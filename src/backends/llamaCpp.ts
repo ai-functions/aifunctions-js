@@ -1,6 +1,7 @@
 import type { AskOptions, AskResult, CreateClientOptions } from "../core/types.js";
 import { NxAiApiError } from "../core/errors.js";
 import { normalizeUsage } from "../core/usage.js";
+import { getLlamaCppEnv } from "../env.js";
 
 type LlamaCppConfig = NonNullable<
   Extract<CreateClientOptions, { backend: "llama-cpp" }>["llamaCpp"]
@@ -16,7 +17,19 @@ function buildPrompt(system: string | undefined, instruction: string): string {
 export function createLlamaCppClient(
   config: Extract<CreateClientOptions, { backend: "llama-cpp" }>
 ): { ask(instruction: string, opts: AskOptions): Promise<AskResult> } {
-  const llamaCpp: LlamaCppConfig = config.llamaCpp;
+  const env = getLlamaCppEnv();
+  const llamaCpp = config.llamaCpp ?? {};
+  const modelPath = llamaCpp.modelPath ?? env.modelPath;
+  const contextSize = llamaCpp.contextSize ?? env.contextSize ?? 4096;
+  const threads = llamaCpp.threads ?? env.threads;
+
+  if (!modelPath) {
+    throw new NxAiApiError(
+      'Missing llama.cpp modelPath. Set LLAMA_CPP_MODEL_PATH in .env or pass llamaCpp.modelPath.',
+      { code: "MISSING_ENV" }
+    );
+  }
+
   let model: Awaited<ReturnType<Awaited<ReturnType<typeof getLlama>>["loadModel"]>> | null = null;
   let initPromise: Promise<void> | null = null;
 
@@ -39,7 +52,7 @@ export function createLlamaCppClient(
     }
     initPromise = (async () => {
       const llama = await getLlama();
-      model = await llama.loadModel({ modelPath: llamaCpp.modelPath });
+      model = await llama.loadModel({ modelPath: modelPath! });
     })();
     await initPromise;
     if (model == null) throw new NxAiApiError("Llama init failed", { code: "MISSING_OPTIONAL_DEP" });
@@ -56,8 +69,8 @@ export function createLlamaCppClient(
       const promptTokenCount = inputTokens.length;
 
       const context = await m.createContext({
-        contextSize: llamaCpp.contextSize ?? 4096,
-        threads: llamaCpp.threads ?? Math.max(1, (await import("os")).cpus().length - 1),
+        contextSize,
+        threads: threads ?? Math.max(1, (await import("os")).cpus().length - 1),
       });
       const sequence = context.getSequence();
 

@@ -48,5 +48,13 @@
     "gguf",
     "transformers.js"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nx-intelligence/nx-ai-api.git"
+  },
+  "homepage": "https://github.com/nx-intelligence/nx-ai-api#readme",
+  "bugs": {
+    "url": "https://github.com/nx-intelligence/nx-ai-api/issues"
+  }
 }

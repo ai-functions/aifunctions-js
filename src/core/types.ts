@@ -46,16 +46,16 @@ export type CreateClientOptions =
     }
   | {
       backend: "llama-cpp";
-      llamaCpp: {
-        modelPath: string;
+      llamaCpp?: {
+        modelPath?: string;
         contextSize?: number;
         threads?: number;
       };
     }
   | {
       backend: "transformersjs";
-      transformersjs: {
-        modelId: string;
+      transformersjs?: {
+        modelId?: string;
         cacheDir?: string;
         device?: "cpu";
       };

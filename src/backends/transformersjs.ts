@@ -1,6 +1,7 @@
 import type { AskOptions, AskResult, CreateClientOptions } from "../core/types.js";
 import { NxAiApiError } from "../core/errors.js";
 import { normalizeUsage } from "../core/usage.js";
+import { getTransformersJsEnv } from "../env.js";
 
 type TransformersJsConfig = NonNullable<
   Extract<CreateClientOptions, { backend: "transformersjs" }>["transformersjs"]
@@ -16,7 +17,18 @@ function buildPrompt(system: string | undefined, instruction: string): string {
 export function createTransformersJsClient(
   config: Extract<CreateClientOptions, { backend: "transformersjs" }>
 ): { ask(instruction: string, opts: AskOptions): Promise<AskResult> } {
-  const transformersjs: TransformersJsConfig = config.transformersjs;
+  const env = getTransformersJsEnv();
+  const transformersjs = config.transformersjs ?? {};
+  const modelId = transformersjs.modelId ?? env.modelId;
+  const cacheDir = transformersjs.cacheDir ?? env.cacheDir;
+
+  if (!modelId) {
+    throw new NxAiApiError(
+      'Missing Transformers.js modelId. Set TRANSFORMERS_JS_MODEL_ID in .env or pass transformersjs.modelId.',
+      { code: "MISSING_ENV" }
+    );
+  }
+
   let pipeline: Awaited<ReturnType<typeof import("@huggingface/transformers").pipeline>> | null =
     null;
   let initPromise: Promise<void> | null = null;
@@ -39,8 +51,8 @@ export function createTransformersJsClient(
           { code: "MISSING_OPTIONAL_DEP" }
         );
       }
-      pipeline = await pipelineFn("text-generation", transformersjs.modelId, {
-        ...(transformersjs.cacheDir && { cache_dir: transformersjs.cacheDir }),
+      pipeline = await pipelineFn("text-generation", modelId, {
+        ...(cacheDir && { cache_dir: cacheDir }),
       });
     })();
     await initPromise;

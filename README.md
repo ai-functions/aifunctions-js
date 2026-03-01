@@ -80,19 +80,26 @@ npm i node-llama-cpp
 
 Get a `.gguf` file and place it e.g. at `./models/tinyllama.gguf`.
 
-### 3) Use it
+### 3) Add `.env` (Optional)
+
+```env
+LLAMA_CPP_MODEL_PATH=./models/tinyllama.gguf
+LLAMA_CPP_THREADS=6
+```
+
+### 4) Use it
 
 ```ts
 import { createClient } from "nx-ai-api";
 
-const ai = createClient({
-  backend: "llama-cpp",
-  llamaCpp: {
-    modelPath: "./models/tinyllama.gguf",
-    contextSize: 4096,
-    threads: 6,
-  },
-});
+// If variables are in .env, no need to pass llamaCpp config:
+const ai = createClient({ backend: "llama-cpp" });
+
+// Or pass them explicitly:
+// const ai = createClient({
+//   backend: "llama-cpp",
+//   llamaCpp: { modelPath: "./models/tinyllama.gguf" }
+// });
 
 const res = await ai.ask("Explain DNS in 3 bullets.", {
   maxTokens: 180,
@@ -144,13 +151,15 @@ createClient({
 ```ts
 createClient({
   backend: "transformersjs",
-  transformersjs: {
-    modelId: string,
+  transformersjs?: {
+    modelId?: string,
     cacheDir?: string,
     device?: "cpu"
   }
 })
 ```
+
+If `TRANSFORMERS_JS_MODEL_ID` is set in `.env`, the `transformersjs` block can be omitted.
 
 ---
 
