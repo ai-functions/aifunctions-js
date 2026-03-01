@@ -16,7 +16,10 @@ function buildPrompt(system: string | undefined, instruction: string): string {
 
 export function createLlamaCppClient(
   config: Extract<CreateClientOptions, { backend: "llama-cpp" }>
-): { ask(instruction: string, opts: AskOptions): Promise<AskResult> } {
+): {
+  ask(instruction: string, opts: AskOptions): Promise<AskResult>;
+  testConnection(): Promise<boolean>;
+} {
   const env = getLlamaCppEnv();
   const llamaCpp = config.llamaCpp ?? {};
   const modelPath = llamaCpp.modelPath ?? env.modelPath;
@@ -92,6 +95,14 @@ export function createLlamaCppClient(
       });
 
       return { text, usage, raw: undefined };
+    },
+    async testConnection(): Promise<boolean> {
+      try {
+        await ensureLoaded();
+        return true;
+      } catch {
+        return false;
+      }
     },
   };
 }

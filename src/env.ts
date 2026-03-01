@@ -7,7 +7,7 @@ export function getOpenRouterEnv(): {
   appName: string | undefined;
 } {
   return {
-    apiKey: process.env.OPENROUTER_API_KEY,
+    apiKey: process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_KEY,
     appUrl: process.env.OPENROUTER_APP_URL,
     appName: process.env.OPENROUTER_APP_NAME,
   };
@@ -22,11 +22,11 @@ export function getLlamaCppEnv(): {
   contextSize: number | undefined;
 } {
   return {
-    modelPath: process.env.LLAMA_CPP_MODEL_PATH,
+    modelPath: process.env.LLAMA_CPP_MODEL_PATH || "./models/model.gguf",
     threads: process.env.LLAMA_CPP_THREADS ? parseInt(process.env.LLAMA_CPP_THREADS, 10) : undefined,
     contextSize: process.env.LLAMA_CPP_CONTEXT_SIZE
       ? parseInt(process.env.LLAMA_CPP_CONTEXT_SIZE, 10)
-      : undefined,
+      : 4096,
   };
 }
 
@@ -38,7 +38,7 @@ export function getTransformersJsEnv(): {
   cacheDir: string | undefined;
 } {
   return {
-    modelId: process.env.TRANSFORMERS_JS_MODEL_ID,
+    modelId: process.env.TRANSFORMERS_JS_MODEL_ID || "Xenova/tiny-random-Gpt2",
     cacheDir: process.env.TRANSFORMERS_JS_CACHE_DIR,
   };
 }

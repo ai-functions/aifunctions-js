@@ -35,7 +35,10 @@ const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 
 export function createOpenRouterClient(
   config: Extract<CreateClientOptions, { backend: "openrouter" }>
-): { ask(instruction: string, opts: AskOptions): Promise<AskResult> } {
+): {
+  ask(instruction: string, opts: AskOptions): Promise<AskResult>;
+  testConnection(): Promise<boolean>;
+} {
   const env = getOpenRouterEnv();
   const openrouter: OpenRouterConfig = config.openrouter ?? {};
   const apiKey = openrouter.apiKey ?? env.apiKey;
@@ -52,6 +55,7 @@ export function createOpenRouterClient(
 
   return {
     async ask(instruction: string, opts: AskOptions): Promise<AskResult> {
+      // ... (existing code omitted for brevity in summary, but I'll replace the block)
       const model = opts.model;
       if (!model) {
         throw new NxAiApiError('OpenRouter backend requires opts.model (e.g. "openai/gpt-4o").', {
@@ -78,12 +82,12 @@ export function createOpenRouterClient(
       }
 
       const url = `${baseUrl}/chat/completions`;
-      const headers: Record<string, string> = {
+      const headersValue: Record<string, string> = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       };
-      if (appUrl) headers["HTTP-Referer"] = appUrl;
-      if (appName) headers["X-OpenRouter-Title"] = appName;
+      if (appUrl) headersValue["HTTP-Referer"] = appUrl;
+      if (appName) headersValue["X-OpenRouter-Title"] = appName;
 
       const timeoutMs = opts.timeoutMs ?? 60_000;
       const controller = new AbortController();
@@ -94,7 +98,7 @@ export function createOpenRouterClient(
         try {
           res = await fetch(url, {
             method: "POST",
-            headers,
+            headers: headersValue,
             body: JSON.stringify(body),
             signal: controller.signal,
           });
@@ -142,6 +146,18 @@ export function createOpenRouterClient(
       };
 
       return doFetch();
+    },
+    async testConnection(): Promise<boolean> {
+      const url = `${baseUrl}/auth/key`;
+      const headersValue = {
+        Authorization: `Bearer ${apiKey}`,
+      };
+      try {
+        const res = await fetch(url, { headers: headersValue });
+        return res.ok;
+      } catch {
+        return false;
+      }
     },
   };
 }

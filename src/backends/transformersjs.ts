@@ -16,7 +16,10 @@ function buildPrompt(system: string | undefined, instruction: string): string {
 
 export function createTransformersJsClient(
   config: Extract<CreateClientOptions, { backend: "transformersjs" }>
-): { ask(instruction: string, opts: AskOptions): Promise<AskResult> } {
+): {
+  ask(instruction: string, opts: AskOptions): Promise<AskResult>;
+  testConnection(): Promise<boolean>;
+} {
   const env = getTransformersJsEnv();
   const transformersjs = config.transformersjs ?? {};
   const modelId = transformersjs.modelId ?? env.modelId;
@@ -87,6 +90,14 @@ export function createTransformersJsClient(
       });
 
       return { text, usage, raw: out };
+    },
+    async testConnection(): Promise<boolean> {
+      try {
+        await ensureLoaded();
+        return true;
+      } catch {
+        return false;
+      }
     },
   };
 }

@@ -2,6 +2,7 @@ export type BackendKind = "openrouter" | "llama-cpp" | "transformersjs";
 
 export type Client = {
   ask(instruction: string, opts: AskOptions): Promise<AskResult>;
+  testConnection(): Promise<boolean>;
 };
 
 export type AskOptions = {
@@ -35,28 +36,28 @@ export type Usage = {
 
 export type CreateClientOptions =
   | {
-      backend: "openrouter";
-      openrouter?: {
-        apiKey?: string;
-        baseUrl?: string;
-        appUrl?: string;
-        appName?: string;
-        allowFallbacksDefault?: boolean;
-      };
-    }
-  | {
-      backend: "llama-cpp";
-      llamaCpp?: {
-        modelPath?: string;
-        contextSize?: number;
-        threads?: number;
-      };
-    }
-  | {
-      backend: "transformersjs";
-      transformersjs?: {
-        modelId?: string;
-        cacheDir?: string;
-        device?: "cpu";
-      };
+    backend: "openrouter";
+    openrouter?: {
+      apiKey?: string;
+      baseUrl?: string;
+      appUrl?: string;
+      appName?: string;
+      allowFallbacksDefault?: boolean;
     };
+  }
+  | {
+    backend: "llama-cpp";
+    llamaCpp?: {
+      modelPath?: string;
+      contextSize?: number;
+      threads?: number;
+    };
+  }
+  | {
+    backend: "transformersjs";
+    transformersjs?: {
+      modelId?: string;
+      cacheDir?: string;
+      device?: "cpu";
+    };
+  };
