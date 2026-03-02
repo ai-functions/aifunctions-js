@@ -1,6 +1,6 @@
 {
   "name": "nx-ai-api",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Minimal ask() API for remote (OpenRouter) and local (llama.cpp / Transformers.js) LLMs",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -15,6 +15,16 @@
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
+      }
+    },
+    "./functions": {
+      "import": {
+        "types": "./dist/functions/index.d.ts",
+        "default": "./dist/functions/index.js"
+      },
+      "require": {
+        "types": "./dist/functions/index.d.cts",
+        "default": "./dist/functions/index.cjs"
       }
     }
   },
@@ -32,8 +42,8 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "node-llama-cpp": "^2.14.0",
-    "@huggingface/transformers": "^3.0.0"
+    "@huggingface/transformers": "^3.0.0",
+    "node-llama-cpp": "^2.14.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
@@ -56,5 +66,8 @@
   "homepage": "https://github.com/nx-intelligence/nx-ai-api#readme",
   "bugs": {
     "url": "https://github.com/nx-intelligence/nx-ai-api/issues"
+  },
+  "dependencies": {
+    "x-llm": "^1.1.3"
   }
 }

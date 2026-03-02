@@ -217,12 +217,122 @@ All errors throw `NxAiApiError`:
 * `code: "TIMEOUT"` – request exceeded `timeoutMs`
 * `code: "MISSING_OPTIONAL_DEP"` – selected backend requires an extra package
 
+
+---
+
+## AI Functions
+
+`nx-ai-api` ships a set of higher-level AI utilities that use the OpenAI Chat Completion API with guaranteed JSON output — importable via the `nx-ai-api/functions` sub-path.
+
+### Setup
+
+These helpers use **OpenAI directly** (not OpenRouter), so you need an `OPENAI_API_KEY` in your `.env`:
+
+```env
+OPENAI_API_KEY=sk-proj-...
+```
+
+### Install `dotenv` if needed
+
+```bash
+npm i dotenv
+```
+
+---
+
+### `callOpenAI<T>` — Guaranteed JSON from OpenAI
+
+A generic wrapper around OpenAI Chat Completions that always returns parsed JSON.
+
+```ts
+import "dotenv/config";
+import { callOpenAI } from "x-llm";
+
+const result = await callOpenAI<{ sentiment: string; score: number }>({
+  model: "gpt-4o-mini",
+  instructions: "You are a sentiment analyzer. Always respond in JSON with keys: sentiment, score.",
+  prompt: "Analyze: 'I absolutely love this product!'",
+});
+
+console.log(result.data.sentiment); // "positive"
+console.log(result.usage);          // { promptTokens, completionTokens, totalTokens }
+console.log(result.finishReason);   // "stop"
+```
+
+> [!IMPORTANT]
+> Always include the word **"JSON"** in your `instructions` or `prompt` when using `json_object` response format.
+
+> [!TIP]
+> Reasoning models (`o1`, `o3`, `gpt-5-*`) automatically switch to `max_completion_tokens` and skip `temperature` / `response_format` — the helper detects this automatically.
+
+---
+
+### `matchLists` — Semantic List Matching
+
+Intelligently matches items from two lists based on semantic similarity and naming.
+
+```ts
+import "dotenv/config";
+import { matchLists } from "nx-ai-api/functions";
+
+const source = [
+  { id: 1, name: "Apple" },
+  { id: 2, name: "Banana" },
+];
+const target = [
+  { item: "Apple", category: "Fruit" },
+  { item: "Tropical Banana", category: "Fruit" },
+  { item: "Carrot", category: "Vegetable" },
+];
+
+const result = await matchLists({
+  list1: source,
+  list2: target,
+  guidance: "Match by name, accepting close variants.",
+});
+
+console.log(result.matches);
+// [
+//   { source: { id: 1, name: "Apple" }, target: { item: "Apple", ... }, reason: "Exact name match" },
+//   { source: { id: 2, name: "Banana" }, target: { item: "Tropical Banana", ... }, reason: "Name variant" }
+// ]
+
+console.log(result.unmatched); // items from list1 with no confident match
+```
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `list1` | `any[]` | ✅ | Source list — every item here gets a match attempt |
+| `list2` | `any[]` | ✅ | Target list to match against |
+| `guidance` | `string` | ✅ | Natural language rules for the AI to follow |
+| `model` | `string` | — | OpenAI model (default: `gpt-4o-mini`) |
+| `additionalInstructions` | `string` | — | Extra instructions appended to the system prompt |
+
+#### Return value
+
+```ts
+{
+  matches: Array<{
+    source: any;   // full object from list1
+    target: any;   // full object from list2
+    reason?: string;
+  }>;
+  unmatched: any[]; // list1 items with no confident target
+}
+```
+
+> [!TIP]
+> **Flexible Schema**: The structure of objects in your lists does not matter. The AI uses semantic similarity across all available fields to find matches. If your structures are complex or ambiguous, use the `guidance` parameter to provide specific matching rules.
+> By default, the AI ignores arbitrary IDs (like UUIDs or auto-increment integers) unless they explicitly match between lists.
+
 ---
 
 ## Security notes
 
 * Never commit `.env`
-* Don't log your OpenRouter key
+* Don't log your OpenRouter or OpenAI key
 * Prefer setting attribution headers so your app is identifiable in OpenRouter analytics.
 
 ---
@@ -236,3 +346,4 @@ OpenRouter recommends `max_completion_tokens`; `max_tokens` is deprecated.
 ### Will token counts match between OpenRouter and local?
 
 No. Tokenization varies by model/backend. `nx-ai-api` normalizes the *shape* of usage; the numbers are backend-specific.
+
