@@ -1,4 +1,9 @@
-import type { AskOptions, AskResult, CreateClientOptions } from "../core/types.js";
+import type {
+  AskOptions,
+  AskResult,
+  CreateClientOptions,
+  StreamChunk,
+} from "../core/types.js";
 import { NxAiApiError } from "../core/errors.js";
 import { normalizeUsage } from "../core/usage.js";
 import { getLlamaCppEnv } from "../env.js";
@@ -18,6 +23,7 @@ export function createLlamaCppClient(
   config: Extract<CreateClientOptions, { backend: "llama-cpp" }>
 ): {
   ask(instruction: string, opts: AskOptions): Promise<AskResult>;
+  askStream(instruction: string, opts: AskOptions): AsyncIterable<StreamChunk>;
   testConnection(): Promise<boolean>;
 } {
   const env = getLlamaCppEnv();
@@ -95,6 +101,39 @@ export function createLlamaCppClient(
       });
 
       return { text, usage, raw: undefined };
+    },
+    async *askStream(instruction: string, opts: AskOptions): AsyncIterable<StreamChunk> {
+      const { model: m } = await ensureLoaded();
+      if (!m) throw new NxAiApiError("Llama model not loaded", { code: "MISSING_OPTIONAL_DEP" });
+
+      const prompt = buildPrompt(opts.system, instruction);
+      const inputTokens = m.tokenize(prompt);
+      const promptTokenCount = inputTokens.length;
+
+      const context = await m.createContext({
+        contextSize,
+        threads: threads ?? Math.max(1, (await import("os")).cpus().length - 1),
+      });
+      const sequence = context.getSequence();
+
+      const resTokens: number[] = [];
+      const maxTokens = opts.maxTokens;
+      const options = { temperature: opts.temperature };
+
+      for await (const token of sequence.evaluate(inputTokens, options)) {
+        resTokens.push(token);
+        yield { type: "text", text: m.detokenize([token]) };
+        if (resTokens.length >= maxTokens) break;
+      }
+
+      const completionTokenCount = resTokens.length;
+      const usage = normalizeUsage({
+        prompt_tokens: promptTokenCount,
+        completion_tokens: completionTokenCount,
+        total_tokens: promptTokenCount + completionTokenCount,
+      });
+      yield { type: "usage", usage };
+      yield { type: "done", usage };
     },
     async testConnection(): Promise<boolean> {
       try {

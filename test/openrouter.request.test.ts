@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
-import { createClient } from "../dist/index.js";
+import { createClient } from "../dist/src/index.js";
 
 const originalFetch = globalThis.fetch;
 

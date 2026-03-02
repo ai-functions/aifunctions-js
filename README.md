@@ -3,6 +3,7 @@
 One tiny API for **remote LLMs (OpenRouter)** and **local CPU LLMs (GGUF via llama.cpp)**:
 
 * `ask("instruction") -> { text, usage }`
+* **Library Functions**: `callAI`, `matchLists`, `extractTopics`, and more (via `/functions`)
 * Returns tokens consistently (`prompt_tokens`, `completion_tokens`, `total_tokens`)
 * OpenRouter provider routing via `vendor` preference
 * Optional local backends (install only what you need)
@@ -220,16 +221,22 @@ All errors throw `NxAiApiError`:
 
 ---
 
-## AI Functions
+## Library Functions (`nx-ai-api/functions`)
 
-`nx-ai-api` ships a set of higher-level AI utilities that use the OpenAI Chat Completion API with guaranteed JSON output — importable via the `nx-ai-api/functions` sub-path.
+`nx-ai-api` ships a set of utility functions for guaranteed JSON output from an LLM — importable via the `nx-ai-api/functions` sub-path.
+
+### Features
+
+- **Guaranteed JSON**: Instructions and sanitization ensure parseable JSON.
+- **Type Safe**: Strong typing of LLM responses.
+- **Mode**: `matchLists`, `extractTopics`, `extractEntities`, `summarize`, and `classify` accept optional `mode?: "weak" | "strong"`. Default is `"strong"`. Use `"weak"` for smaller or local models (shorter instructions, lower temperature).
 
 ### Setup
 
-These helpers use **OpenAI directly** (not OpenRouter), so you need an `OPENAI_API_KEY` in your `.env`:
+Library functions use the **OpenRouter** client by default. Set `OPENROUTER_API_KEY` in your `.env`, or pass a custom `client` (e.g. from `createClient({ backend: "llama-cpp" })`).
 
 ```env
-OPENAI_API_KEY=sk-proj-...
+OPENROUTER_API_KEY=sk-or-...
 ```
 
 ### Install `dotenv` if needed
@@ -240,92 +247,160 @@ npm i dotenv
 
 ---
 
-### `callOpenAI<T>` — Guaranteed JSON from OpenAI
-
-A generic wrapper around OpenAI Chat Completions that always returns parsed JSON.
-
-```ts
-import "dotenv/config";
-import { callOpenAI } from "x-llm";
-
-const result = await callOpenAI<{ sentiment: string; score: number }>({
-  model: "gpt-4o-mini",
-  instructions: "You are a sentiment analyzer. Always respond in JSON with keys: sentiment, score.",
-  prompt: "Analyze: 'I absolutely love this product!'",
-});
-
-console.log(result.data.sentiment); // "positive"
-console.log(result.usage);          // { promptTokens, completionTokens, totalTokens }
-console.log(result.finishReason);   // "stop"
-```
-
-> [!IMPORTANT]
-> Always include the word **"JSON"** in your `instructions` or `prompt` when using `json_object` response format.
-
-> [!TIP]
-> Reasoning models (`o1`, `o3`, `gpt-5-*`) automatically switch to `max_completion_tokens` and skip `temperature` / `response_format` — the helper detects this automatically.
-
----
-
 ### `matchLists` — Semantic List Matching
 
 Intelligently matches items from two lists based on semantic similarity and naming.
 
 ```ts
-import "dotenv/config";
 import { matchLists } from "nx-ai-api/functions";
-
-const source = [
-  { id: 1, name: "Apple" },
-  { id: 2, name: "Banana" },
-];
-const target = [
-  { item: "Apple", category: "Fruit" },
-  { item: "Tropical Banana", category: "Fruit" },
-  { item: "Carrot", category: "Vegetable" },
-];
 
 const result = await matchLists({
   list1: source,
   list2: target,
   guidance: "Match by name, accepting close variants.",
+  mode: "strong",  // optional: "weak" | "strong"
 });
-
-console.log(result.matches);
-// [
-//   { source: { id: 1, name: "Apple" }, target: { item: "Apple", ... }, reason: "Exact name match" },
-//   { source: { id: 2, name: "Banana" }, target: { item: "Tropical Banana", ... }, reason: "Name variant" }
-// ]
-
-console.log(result.unmatched); // items from list1 with no confident match
 ```
 
-#### Parameters
+---
 
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `list1` | `any[]` | ✅ | Source list — every item here gets a match attempt |
-| `list2` | `any[]` | ✅ | Target list to match against |
-| `guidance` | `string` | ✅ | Natural language rules for the AI to follow |
-| `model` | `string` | — | OpenAI model (default: `gpt-4o-mini`) |
-| `additionalInstructions` | `string` | — | Extra instructions appended to the system prompt |
+### `extractTopics` — Topic Extraction
 
-#### Return value
+Extracts key topics from the provided text.
 
 ```ts
-{
-  matches: Array<{
-    source: any;   // full object from list1
-    target: any;   // full object from list2
-    reason?: string;
-  }>;
-  unmatched: any[]; // list1 items with no confident target
-}
+import { extractTopics } from "nx-ai-api/functions";
+
+const { topics } = await extractTopics({ 
+  text: "Very long article about space exploration and NASA's next missions...",
+  maxTopics: 3,
+  mode: "strong",  // optional: "weak" | "strong"
+});
+```
+
+---
+
+### `extractEntities` — Named Entity Extraction
+
+Extracts named entities (People, Organizations, Locations, etc.) from the text.
+
+```ts
+import { extractEntities } from "nx-ai-api/functions";
+
+const { entities } = await extractEntities({ 
+  text: "Apple was founded by Steve Jobs in Cupertino.",
+  mode: "strong",  // optional: "weak" | "strong"
+});
+// [{ name: "Apple", type: "Organization" }, { name: "Steve Jobs", type: "Person" }, ...]
+```
+
+---
+
+### `summarize` — Text Summarization
+
+Generates a concise summary and key points.
+
+```ts
+import { summarize } from "nx-ai-api/functions";
+
+const { summary, keyPoints } = await summarize({ 
+  text: "...content...",
+  length: "brief",  // "brief" | "medium" | "detailed"
+  mode: "strong",   // optional: "weak" | "strong"
+});
+```
+
+---
+
+### `classify` — Text Classification
+
+Classifies text into one or more provided categories.
+
+```ts
+import { classify } from "nx-ai-api/functions";
+
+const { categories } = await classify({ 
+  text: "I am having trouble with my subscription.",
+  categories: ["Billing", "Technical Support", "General Inquiry"],
+  mode: "strong",  // optional: "weak" | "strong"
+});
+```
+
+---
+
+### `sentiment` — Sentiment Analysis
+
+Analyzes the sentiment (positive, negative, or neutral).
+
+```ts
+import { sentiment } from "nx-ai-api/functions";
+
+const { sentiment: label, score } = await sentiment({ 
+  text: "This is the best product ever!" 
+});
+```
+
+---
+
+### `translate` — Translation
+
+Translates text to a target language.
+
+```ts
+import { translate } from "nx-ai-api/functions";
+
+const { translatedText } = await translate({ 
+  text: "Hello, how are you?",
+  targetLanguage: "French" 
+});
+```
+
+---
+
+### `rank` — Relevance Ranking
+
+Ranks a list of items based on a query.
+
+```ts
+import { rank } from "nx-ai-api/functions";
+
+const { rankedItems } = await rank({
+  items: products,
+  query: "Affordable noise-cancelling headphones"
+});
+```
+
+---
+
+### `cluster` — Semantic Clustering
+
+Groups a list of items into semantic clusters.
+
+```ts
+import { cluster } from "nx-ai-api/functions";
+
+const { clusters } = await cluster({
+  items: userFeedbackList,
+  numClusters: 3
+});
 ```
 
 > [!TIP]
-> **Flexible Schema**: The structure of objects in your lists does not matter. The AI uses semantic similarity across all available fields to find matches. If your structures are complex or ambiguous, use the `guidance` parameter to provide specific matching rules.
-> By default, the AI ignores arbitrary IDs (like UUIDs or auto-increment integers) unless they explicitly match between lists.
+> **Flexible Schema**: For list operations (`matchLists`, `rank`, `cluster`), the structure of objects in your lists does not matter. The AI uses semantic similarity across all available fields.
+
+
+---
+
+## Testing
+
+Build, then run tests:
+
+```bash
+npm run build && npm run test
+```
+
+- **Mocked tests** (`test/openrouter.parse.test.ts`, `test/openrouter.request.test.ts`, `test/functions.callAI.test.ts`): No API key required; they stub the client or HTTP.
+- **Live tests** (`test/library.live.test.ts`, `test/matchLists.live.test.ts`): Hit the real API. Set `OPENROUTER_API_KEY` in `.env` (or pass a `client` that uses your preferred backend) so library function tests can run.
 
 ---
 

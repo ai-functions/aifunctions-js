@@ -9,6 +9,7 @@ export type {
   AskOptions,
   AskResult,
   Usage,
+  StreamChunk,
   CreateClientOptions,
 } from "./core/types.js";
 export { NxAiApiError } from "./core/errors.js";

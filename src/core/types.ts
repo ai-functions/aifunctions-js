@@ -1,7 +1,15 @@
 export type BackendKind = "openrouter" | "llama-cpp" | "transformersjs";
 
+/** Chunk yielded from askStream(); usage may follow at end. */
+export type StreamChunk =
+  | { type: "text"; text: string }
+  | { type: "usage"; usage: Usage }
+  | { type: "done"; usage?: Usage };
+
 export type Client = {
   ask(instruction: string, opts: AskOptions): Promise<AskResult>;
+  /** Optional: stream tokens/chunks. Not all backends implement this. */
+  askStream?(instruction: string, opts: AskOptions): AsyncIterable<StreamChunk>;
   testConnection(): Promise<boolean>;
 };
 
