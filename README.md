@@ -524,7 +524,7 @@ npm run content:sync
 - **Skip tests:** `npm run content:sync:no-test` or `npx tsx scripts/testOptimizeAndPush.ts -- --skip-tests`.
 - **Skip push (local-only):** `npx tsx scripts/testOptimizeAndPush.ts -- --no-push` or `--push=false`. Use after optimization if you want to review before pushing the best version or rules.
 
-Requires `SKILLS_PUBLISHER_TOKEN` or `GITHUB_TOKEN` for push (HTTPS). Optimization requires `OPENROUTER_API_KEY`. Add `.content/` to `.gitignore` if you don’t want to commit the local content clone.
+Requires `SKILLS_PUBLISHER_TOKEN` or `GITHUB_TOKEN` for push (HTTPS). Optimization requires `OPENROUTER_API_KEY`. Add `.content/` to `.gitignore` if you don’t want to commit the local content clone. **If the remote repo is still empty,** see the detailed [Skills repo population plan](docs/SKILLS_REPO_POPULATION_PLAN.md) for prerequisites, steps, and troubleshooting.
 
 After a successful push, the remote will contain a **`skills/`** tree: e.g. `skills/extractTopics/weak.md`, `skills/extractTopics/normal.md`, `skills/matchLists/weak.md`, etc. You need write access to the repo for the push to succeed; otherwise the remote will stay empty of these files.
 
@@ -539,6 +539,8 @@ Build, then run tests:
 npm run build && npm run test
 ```
 
+- **`npm run test:unit`** — Runs only unit tests (excludes `*.live.test.ts`). Use for fast CI or when you don’t have `OPENROUTER_API_KEY` or a local model; completes in a few seconds.
+- **`npm run test`** — Full suite including live API verification (requires `OPENROUTER_API_KEY` for strong/normal; weak tests are skipped without a local model).
 - **Mocked tests** (`test/openrouter.parse.test.ts`, `test/openrouter.request.test.ts`, `test/functions.callAI.test.ts`): No API key required; they stub the client or HTTP.
 - **Live tests** (`test/library.live.test.ts`, `test/matchLists.live.test.ts`): Hit the real API. Set `OPENROUTER_API_KEY` in `.env` (or pass a `client` that uses your preferred backend) so library function tests can run.
 

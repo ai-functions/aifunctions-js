@@ -37,6 +37,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test --ext .ts",
     "test": "node --test test/**/*.test.ts",
+    "test:unit": "node --test test/ai.ask.test.ts test/askJson.test.ts test/content.libraryIndex.test.ts test/content.skillsResolver.test.ts test/functions.callAI.test.ts test/functions.router.test.ts test/jsonHelpers.test.ts test/openrouter.parse.test.ts test/openrouter.request.test.ts test/parseJsonResponse.test.ts",
+    "test:live:one": "node --test test/library.live.test.ts --test-name-pattern",
     "content:sync": "npm run build && tsx scripts/testOptimizeAndPush.ts",
     "content:sync:optimize": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --optimize",
     "content:sync:optimize:new": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --optimize --only-file-based --no-push",
@@ -75,7 +77,7 @@
     "url": "https://github.com/nx-intelligence/light-skills/issues"
   },
   "dependencies": {
-    "nx-content": "^1.2.4",
+    "nx-content": "^1.2.5",
     "simple-git": "^3.22.0",
     "x-llm": "^1.1.3"
   }

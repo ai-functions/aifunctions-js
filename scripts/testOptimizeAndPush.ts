@@ -15,7 +15,7 @@
  *   --skip-tests   Skip build and test; only write instructions and optionally push.
  *   --no-push      Do not push to git (default: push).
  *
- * Prerequisites: push = SKILLS_PUBLISHER_TOKEN or GITHUB_TOKEN. Optimization = OPENROUTER_API_KEY.
+ * Prerequisites: push = SKILLS_PUBLISHER_TOKEN or GITHUB_TOKEN (set in env; not loaded from .env by default). Optimization = OPENROUTER_API_KEY. Users can override by setting env (e.g. export, or node --env-file=.env).
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
