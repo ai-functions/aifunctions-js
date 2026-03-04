@@ -507,11 +507,11 @@ const { committed, pushed } = await pushSkillsContent({
 
 ### Test, sync instructions, and push (one command)
 
-To **test all skill functions**, **write current skill instructions** from the codebase into `.content`, and **push to the skills repo** in one go, use the `content:sync` script. It uses nx-content’s local backend and `pushToRemote()`. Pushing to git is **on by default** (automated); use `--no-push` to sync locally only (e.g. to review after an optimization step).
+To **test all skill functions**, **write current skill instructions** from the codebase into `.content`, and **push to the skills repo** in one go, use the `content:sync` script. It uses nx-content’s local backend and `pushToRemote()`. Pushing is **on by default** so the skills repo acts as the project's **memory** (persisted rules, instructions, and skill definitions); pass `--no-push` only when you want to sync locally without persisting (e.g. to review first).
 
 1. Builds the project and writes instruction files for every built-in skill (extractTopics, matchLists, summarize, etc.) into `.content` using the default instruction manifest.
 2. Runs the full test suite (`npm test`). If tests fail, it does not push.
-3. By default, commits and pushes `.content` to the remote (`DEFAULT_SKILLS_REPO_URL`). Pass `--no-push` to skip the push.
+3. By default, commits and pushes `.content` to the remote so the remote stays the source of truth (memory). Pass `--no-push` only when you want to sync locally without persisting.
 
 If `.content` does not exist, the script **clones** the skills repo (e.g. [nx-morpheus/skills-functions](https://github.com/nx-morpheus/skills-functions)) into `.content`, so the remote’s existing files are preserved and the push adds the new `skills/` tree.
 
@@ -522,7 +522,7 @@ npm run content:sync
 - **With optimization:** `npm run content:sync:optimize` or add `--optimize` to the script. Runs an LLM pass on each skill’s instructions (clarity/brevity), writes one **Markdown report per skill** to `reports/optimize/<skillName>.md` (original vs optimized, word counts, token usage, duration), then updates `.content` with the optimized instructions and pushes (unless `--no-push`). Use `--no-report` to skip writing reports; use `--skills=name1,name2` to run only on those skills; use `--only-file-based` to run only on file-only (new) skills first.
 - **Optimize new ones first:** `npm run content:sync:optimize:new` runs optimization with `--only-file-based --no-push` (no push). When you have content-only skills (no manifest entry), they are treated as “new”; run this first, then run full `content:sync:optimize` for all.
 - **Skip tests:** `npm run content:sync:no-test` or `npx tsx scripts/testOptimizeAndPush.ts -- --skip-tests`.
-- **Skip push (local-only):** `npx tsx scripts/testOptimizeAndPush.ts -- --no-push` or `--push=false`. Use after optimization if you want to review before pushing the best version or rules.
+- **Skip push (local-only):** `npx tsx scripts/testOptimizeAndPush.ts -- --no-push` or `--push=false`. Use only when you want to sync locally without persisting (e.g. review before pushing).
 
 Requires `SKILLS_PUBLISHER_TOKEN` or `GITHUB_TOKEN` for push (HTTPS). Optimization requires `OPENROUTER_API_KEY`. Add `.content/` to `.gitignore` if you don’t want to commit the local content clone. **If the remote repo is still empty,** see the detailed [Skills repo population plan](docs/SKILLS_REPO_POPULATION_PLAN.md) for prerequisites, steps, and troubleshooting.
 

@@ -45,7 +45,11 @@ export type {
   SkillVersionEntry,
   SetActiveVersionOptions,
 } from "./content/skillsResolver.js";
-export { DEFAULT_SKILLS_REPO_URL, DEFAULT_SKILLS_BRANCH } from "./content/skillsRepo.js";
+export {
+  DEFAULT_SKILLS_REPO_URL,
+  DEFAULT_SKILLS_BRANCH,
+  getSkillsRepoUrl,
+} from "./content/skillsRepo.js";
 export { pushSkillsContent } from "./content/publishSkills.js";
 export type { PushSkillsContentOptions } from "./content/publishSkills.js";
 

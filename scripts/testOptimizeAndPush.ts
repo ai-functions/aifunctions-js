@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
  * Test, sync skill instructions to content, optionally optimize them, and (by default) push to remote.
+ * Push-by-default gives the project "memory": the skills repo persists rules, instructions, and skill definitions so we can keep improving. Use --no-push only when you want to sync locally without persisting (e.g. to review before pushing).
  * 1) Ensures .content exists (clones repo if missing).
  * 2) Writes current skill instructions and rules (from manifest) to local content root. Definition of done: git remote has both instructions and rules (skills/<name>-instructions.md, skills/<name>-rules.json, and legacy keys).
  * 3) If --optimize: runs LLM optimization per skill. Legacy skills: weak + normal modes, report with both sections, writes legacy keys and file-based key (optimized normal). File-only skills: single instruction, single-section report, writes skills/<name>-instructions.md.
  * 4) Runs full test suite (build + npm test) unless --skip-tests.
- * 5) By default pushes local content to remote via nx-content's pushToRemote().
+ * 5) By default pushes local content to remote via nx-content's pushToRemote() so the remote stays the source of truth (memory).
  *
  * Flags:
  *   --optimize          Run optimization on each skill's instructions; write reports to reports/optimize/ and update content.
@@ -13,17 +14,18 @@
  *   --skills=name1,name2   Only run optimization on these skills (default: all).
  *   --only-file-based     Only run optimization on "new" skills (file-only, no manifest entry). Use this to run on new ones first.
  *   --skip-tests   Skip build and test; only write instructions and optionally push.
- *   --no-push      Do not push to git (default: push).
+ *   --no-push      Do not push to git. Default is push (persist to remote for memory); use --no-push only to sync locally.
  *
- * Prerequisites: push = SKILLS_PUBLISHER_TOKEN or GITHUB_TOKEN (set in env; not loaded from .env by default). Optimization = OPENROUTER_API_KEY. Users can override by setting env (e.g. export, or node --env-file=.env).
+ * Prerequisites: push = SKILLS_PUBLISHER_TOKEN or GITHUB_TOKEN. Defaults are loaded from src/config/default.content.env (package default); set env to override. Optimization = OPENROUTER_API_KEY.
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 import { ContentResolver } from "nx-content";
 import simpleGit from "simple-git";
-import { DEFAULT_SKILLS_BRANCH, DEFAULT_SKILLS_REPO_URL } from "../src/content/skillsRepo.js";
+import { DEFAULT_SKILLS_BRANCH, getSkillsRepoUrl } from "../src/content/skillsRepo.js";
 import {
   getSkillInstructions,
   setSkillInstructions,
@@ -39,6 +41,12 @@ import { optimizeInstruction } from "./optimizeInstructions.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const contentDir = path.join(rootDir, ".content");
+
+// Package default env (e.g. GITHUB_TOKEN, GITHUB_REPO_URL); override: false so user env wins
+const defaultEnvPath = path.join(rootDir, "src/config/default.content.env");
+if (fs.existsSync(defaultEnvPath)) {
+  dotenv.config({ path: defaultEnvPath, override: false });
+}
 
 function parseBoolArg(args: string[], name: string, defaultValue: boolean): boolean {
   if (args.includes(`--no-${name}`)) return false;
@@ -184,7 +192,7 @@ async function main(): Promise<void> {
   const skillsFilter = parseSkillsFilter(args);
   /** Only optimize file-only (new) skills when set. */
   const onlyFileBased = args.includes("--only-file-based");
-  /** By default push to git; set --no-push or --push=false to skip. */
+  /** By default push to git so the skills repo stays our memory; set --no-push to sync locally only. */
   const pushToGit = parseBoolArg(args, "push", true);
 
   console.log("Content root:", contentDir);
@@ -195,13 +203,18 @@ async function main(): Promise<void> {
     if (skillsFilter?.length) console.log("Skills filter:", skillsFilter.join(", "));
     if (onlyFileBased) console.log("Only file-based (new) skills: yes");
   }
-  if (!pushToGit) console.log("Push to git: disabled (--no-push)");
+  if (pushToGit) {
+    console.log("Push to remote: enabled (default). Use --no-push to sync locally only.");
+  } else {
+    console.log("Push to git: disabled (--no-push). Content is local only.");
+  }
 
   if (!fs.existsSync(contentDir)) {
     console.log("Cloning skills repo into .content...");
     const git = simpleGit(rootDir);
-    await git.clone(DEFAULT_SKILLS_REPO_URL, contentDir, ["--depth", "1"]);
-    console.log("Cloned", DEFAULT_SKILLS_REPO_URL, "into .content");
+    const repoUrl = getSkillsRepoUrl();
+    await git.clone(repoUrl, contentDir, ["--depth", "1"]);
+    console.log("Cloned", repoUrl, "into .content");
   } else {
     const git = simpleGit(contentDir);
     const isRepo = await git.checkIsRepo();
@@ -210,7 +223,7 @@ async function main(): Promise<void> {
       try {
         await git.getRemotes();
       } catch {
-        await git.addRemote("origin", DEFAULT_SKILLS_REPO_URL);
+        await git.addRemote("origin", getSkillsRepoUrl());
       }
       console.log("Initialized git in .content.");
     }
@@ -219,7 +232,7 @@ async function main(): Promise<void> {
   const resolver = new ContentResolver({
     localRoot: contentDir,
     mode: "dev",
-    gitRepoUrl: DEFAULT_SKILLS_REPO_URL,
+    gitRepoUrl: getSkillsRepoUrl(),
     gitBranch: DEFAULT_SKILLS_BRANCH,
     gitToken: process.env.SKILLS_PUBLISHER_TOKEN || process.env.GITHUB_TOKEN,
   });

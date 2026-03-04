@@ -55,3 +55,38 @@ export type { AskParams } from "./ai/ask.js";
 
 export { run, runWithContent, getSkillNames, getSkillNamesAsync } from "./router.js";
 export type { ContentSkillMode, RunWithContentOptions, RunOptions } from "./router.js";
+
+export type { JudgeRule, JudgeOutput, WeightScale } from "./judge/types.js";
+export { normalizeJudgeRules, aggregateJudgeFeedback, judgeV1, fixInstructionsV1, generateRuleV1, generateJudgeRulesV1, optimizeInstructionsV1 } from "./judge/index.js";
+export type {
+  NormalizeJudgeRulesRequest,
+  NormalizeJudgeRulesOutput,
+  AggregateJudgeFeedbackRequest,
+  AggregateJudgeFeedbackOutput,
+  JudgeRequest,
+  FixInstructionsRequest,
+  FixInstructionsOutput,
+  GenerateRuleRequest,
+  GenerateRuleOutput,
+  GenerateJudgeRulesRequest,
+  GenerateJudgeRulesOutput,
+  OptimizeInstructionsRequest,
+  OptimizeInstructionsOutput,
+} from "./judge/index.js";
+
+export { compareV1, raceModelsV1, generateInstructionsV1 } from "./orchestration/index.js";
+export type {
+  CompareRequest,
+  CompareOutput,
+  RaceModelsRequest,
+  RaceModelsOutput,
+  GenerateInstructionsRequest,
+  GenerateInstructionsOutput,
+} from "./orchestration/index.js";
+
+export { collectionMappingV1 } from "./recordsMapper/index.js";
+export type {
+  CollectionMappingRequest,
+  CollectionMappingOutput,
+  CollectionSummary,
+} from "./recordsMapper/index.js";

@@ -3,7 +3,7 @@ import {
   normalizeKeySegment,
   type ContentManagerConfig,
 } from "nx-content";
-import { DEFAULT_SKILLS_BRANCH, DEFAULT_SKILLS_REPO_URL } from "./skillsRepo.js";
+import { DEFAULT_SKILLS_BRANCH, getSkillsRepoUrl } from "./skillsRepo.js";
 
 const ENV_TOKEN =
   typeof process !== "undefined"
@@ -11,7 +11,7 @@ const ENV_TOKEN =
     : undefined;
 
 export type SkillsResolverOptions = {
-  /** Override default Git repo URL. Omit to use DEFAULT_SKILLS_REPO_URL. */
+  /** Override default Git repo URL. Omit to use getSkillsRepoUrl() (env GITHUB_REPO_URL or default). */
   gitRepoUrl?: string | null;
   /** Override default branch. */
   gitBranch?: string;
@@ -35,7 +35,7 @@ function getSkillsContentConfig(
   const gitRepoUrl =
     options?.gitRepoUrl !== undefined
       ? options.gitRepoUrl
-      : DEFAULT_SKILLS_REPO_URL;
+      : getSkillsRepoUrl();
   const gitBranch = options?.gitBranch ?? DEFAULT_SKILLS_BRANCH;
   const gitToken = options?.gitToken ?? ENV_TOKEN;
 
@@ -51,7 +51,7 @@ function getSkillsContentConfig(
 
 /**
  * Create a ContentResolver for skills content.
- * Uses DEFAULT_SKILLS_REPO_URL and DEFAULT_SKILLS_BRANCH unless overridden.
+ * Uses getSkillsRepoUrl() (env GITHUB_REPO_URL or default) and DEFAULT_SKILLS_BRANCH unless overridden.
  * Token: options.gitToken, or env SKILLS_PUBLISHER_TOKEN, or GITHUB_TOKEN.
  */
 export function getSkillsResolver(
