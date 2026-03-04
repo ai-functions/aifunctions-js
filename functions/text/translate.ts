@@ -1,8 +1,11 @@
 import { callAI } from "../callAI.js";
+import type { Client, LlmMode } from "../../src/index.js";
 
 export interface TranslateParams {
     text: string;
     targetLanguage: string;
+    mode?: LlmMode;
+    client?: Client;
     model?: string;
 }
 
@@ -15,7 +18,7 @@ export interface TranslateResult {
  * Translates text to a target language.
  */
 export async function translate(params: TranslateParams): Promise<TranslateResult> {
-    const { text, targetLanguage, model = "gpt-4o-mini" } = params;
+    const { text, targetLanguage, mode = "normal", client, model } = params;
 
     const instructions = `
 Translate the following text into ${targetLanguage}.
@@ -25,9 +28,11 @@ Respond in JSON format with "translatedText" and "detectedSourceLanguage".
     `.trim();
 
     const result = await callAI<TranslateResult>({
-        model,
-        instructions: { weak: instructions, strong: instructions },
+        client,
+        mode,
+        instructions: { weak: instructions, normal: instructions },
         prompt: text,
+        model,
     });
 
     return result.data;

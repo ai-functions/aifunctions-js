@@ -1,5 +1,5 @@
 {
-  "name": "nx-ai-api",
+  "name": "light-skills",
   "version": "2.0.0",
   "description": "Minimal ask() API for remote (OpenRouter) and local (llama.cpp / Transformers.js) LLMs",
   "type": "module",
@@ -36,7 +36,9 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test --ext .ts",
-    "test": "node --test test/**/*.test.ts"
+    "test": "node --test test/**/*.test.ts",
+    "content:sync": "npm run build && tsx scripts/testOptimizeAndPush.ts",
+    "content:sync:no-test": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --skip-tests"
   },
   "engines": {
     "node": ">=18"
@@ -49,6 +51,7 @@
     "@types/node": "^20.10.0",
     "eslint": "^8.56.0",
     "tsup": "^8.0.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.3.0"
   },
   "keywords": [
@@ -61,13 +64,15 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nx-intelligence/nx-ai-api.git"
+    "url": "git+https://github.com/nx-intelligence/light-skills.git"
   },
-  "homepage": "https://github.com/nx-intelligence/nx-ai-api#readme",
+  "homepage": "https://github.com/nx-intelligence/light-skills#readme",
   "bugs": {
-    "url": "https://github.com/nx-intelligence/nx-ai-api/issues"
+    "url": "https://github.com/nx-intelligence/light-skills/issues"
   },
   "dependencies": {
+    "nx-content": "^1.2.2",
+    "simple-git": "^3.22.0",
     "x-llm": "^1.1.3"
   }
 }

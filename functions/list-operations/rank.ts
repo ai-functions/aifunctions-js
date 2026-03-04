@@ -1,8 +1,11 @@
 import { callAI } from "../callAI.js";
+import type { Client, LlmMode } from "../../src/index.js";
 
 export interface RankParams {
     items: any[];
     query: string;
+    mode?: LlmMode;
+    client?: Client;
     model?: string;
 }
 
@@ -20,7 +23,7 @@ export interface RankResult {
  * Ranks a list of items based on a query or specific criteria.
  */
 export async function rank(params: RankParams): Promise<RankResult> {
-    const { items, query, model = "gpt-4o-mini" } = params;
+    const { items, query, mode = "normal", client, model } = params;
 
     const instructions = `
 Rank the following items based on their relevance to this query: "${query}".
@@ -35,9 +38,11 @@ ${JSON.stringify(items, null, 2)}
     `.trim();
 
     const result = await callAI<RankResult>({
-        model,
-        instructions: { weak: instructions, strong: instructions },
+        client,
+        mode,
+        instructions: { weak: instructions, normal: instructions },
         prompt: userPrompt,
+        model,
     });
 
     return result.data;

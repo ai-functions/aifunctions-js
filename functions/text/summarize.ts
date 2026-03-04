@@ -1,11 +1,11 @@
 import { callAI, callAIStream } from "../callAI.js";
-import type { Client } from "../../src/index.js";
+import type { Client, LlmMode } from "../../src/index.js";
 import type { StreamChunk } from "../../src/index.js";
 
 export interface SummarizeParams {
     text: string;
     length?: "brief" | "medium" | "detailed";
-    mode?: "weak" | "strong";
+    mode?: LlmMode;
     client?: Client;
     model?: string;
 }
@@ -19,7 +19,7 @@ export interface SummarizeResult {
  * Generates a concise summary and key points from the input text.
  */
 export async function summarize(params: SummarizeParams): Promise<SummarizeResult> {
-    const { text, length = "medium", mode = "strong", client, model = "gpt-4o-mini" } = params;
+    const { text, length = "medium", mode = "normal", client, model } = params;
 
     const lengthMap = {
         brief: "1-2 sentences",
@@ -43,8 +43,8 @@ JSON ONLY: {"summary": "...", "keyPoints": []}
         client,
         mode,
         instructions: {
-            strong: strongInstructions,
             weak: weakInstructions,
+            normal: strongInstructions,
         },
         prompt: text,
         model,
@@ -60,7 +60,7 @@ JSON ONLY: {"summary": "...", "keyPoints": []}
 export async function* summarizeStream(
     params: SummarizeParams
 ): AsyncGenerator<StreamChunk> {
-    const { text, length = "medium", mode = "strong", client, model = "gpt-4o-mini" } = params;
+    const { text, length = "medium", mode = "normal", client, model } = params;
     const lengthMap = {
         brief: "1-2 sentences",
         medium: "a concise paragraph",
@@ -79,7 +79,7 @@ JSON ONLY: {"summary": "...", "keyPoints": []}
     yield* callAIStream({
         client,
         mode,
-        instructions: { strong: strongInstructions, weak: weakInstructions },
+        instructions: { weak: weakInstructions, normal: strongInstructions },
         prompt: text,
         model,
     });

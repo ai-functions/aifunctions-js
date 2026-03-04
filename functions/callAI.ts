@@ -1,14 +1,24 @@
-import { createClient, type Client, type AskResult, type StreamChunk } from "../src/index.js";
+import {
+    createClient,
+    getModePreset,
+    type Client,
+    type AskResult,
+    type StreamChunk,
+    type LlmMode,
+} from "../src/index.js";
+
+export type { LlmMode };
 
 export interface CallAIParams {
     client?: Client;
-    mode?: "weak" | "strong";
+    mode?: LlmMode;
     instructions: {
         weak: string;
-        strong: string;
+        normal: string;
+        strong?: string;
     };
     prompt: string;
-    model?: string; // Optional override for cloud models
+    model?: string;
 }
 
 export interface CallAIResult<T> {
@@ -22,30 +32,35 @@ export interface CallAIResult<T> {
 }
 
 /**
- * Common wrapper for calling AI models in nx-ai-api functions.
- * Handles switching between weak/strong instructions and sanitizes JSON output.
+ * Common wrapper for calling AI models in light-skills functions.
+ * Uses mode presets: weak = llama-cpp (Llama 2.0; no key), normal = openrouter gpt-5-nano, strong = openrouter gpt-5.2.
+ * Strong instructions fall back to normal when not provided.
  */
 export async function callAI<T>(params: CallAIParams): Promise<CallAIResult<T>> {
     const {
         client: providedClient,
-        mode = "strong",
+        mode = "normal",
         instructions,
         prompt,
-        model
+        model: modelOverride,
     } = params;
 
-    // Use provided client or default to OpenRouter (strong)
-    const client = providedClient || createClient({ backend: "openrouter" });
+    const preset = getModePreset(mode);
+    const client = providedClient || createClient({ backend: preset.backend });
+    const model =
+        modelOverride ?? (preset.backend === "openrouter" ? preset.model : undefined);
+    const instruction =
+        mode === "weak"
+            ? instructions.weak
+            : mode === "strong"
+              ? (instructions.strong ?? instructions.normal)
+              : instructions.normal;
 
-    const instruction = mode === "weak" ? instructions.weak : instructions.strong;
-
-    // Local models (weak) often need more explicit prompting to stay in JSON mode
-    // even with the system instruction, so we combine them if needed or just pass as is.
     const res = await client.ask(prompt, {
         system: instruction,
-        model: model, // Only used by OpenRouter
-        maxTokens: 4096,
-        temperature: mode === "weak" ? 0.1 : 0.7, // Lower temp for weak models to improve reliability
+        model,
+        maxTokens: preset.maxTokens,
+        temperature: preset.temperature,
     });
 
     let text = res.text.trim();
@@ -80,19 +95,27 @@ export async function callAI<T>(params: CallAIParams): Promise<CallAIResult<T>> 
 export async function* callAIStream(params: CallAIParams): AsyncGenerator<StreamChunk> {
     const {
         client: providedClient,
-        mode = "strong",
+        mode = "normal",
         instructions,
         prompt,
-        model,
+        model: modelOverride,
     } = params;
 
-    const client = providedClient || createClient({ backend: "openrouter" });
-    const instruction = mode === "weak" ? instructions.weak : instructions.strong;
+    const preset = getModePreset(mode);
+    const client = providedClient || createClient({ backend: preset.backend });
+    const model =
+        modelOverride ?? (preset.backend === "openrouter" ? preset.model : undefined);
+    const instruction =
+        mode === "weak"
+            ? instructions.weak
+            : mode === "strong"
+              ? (instructions.strong ?? instructions.normal)
+              : instructions.normal;
     const opts = {
         system: instruction,
         model,
-        maxTokens: 4096,
-        temperature: mode === "weak" ? 0.1 : 0.7,
+        maxTokens: preset.maxTokens,
+        temperature: preset.temperature,
     };
 
     if (typeof client.askStream === "function") {

@@ -1,5 +1,8 @@
 export type BackendKind = "openrouter" | "llama-cpp" | "transformersjs";
 
+/** LLM capability level: weak (local, e.g. Llama 2.0), normal (default cloud), strong (highest capability). */
+export type LlmMode = "weak" | "normal" | "strong";
+
 /** Chunk yielded from askStream(); usage may follow at end. */
 export type StreamChunk =
   | { type: "text"; text: string }

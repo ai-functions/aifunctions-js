@@ -1,10 +1,10 @@
 import { callAI } from "../callAI.js";
-import type { Client } from "../../src/index.js";
+import type { Client, LlmMode } from "../../src/index.js";
 
 export interface ExtractEntitiesParams {
     text: string;
     entityTypes?: string[];
-    mode?: "weak" | "strong";
+    mode?: LlmMode;
     client?: Client;
     model?: string;
 }
@@ -26,9 +26,9 @@ export async function extractEntities(params: ExtractEntitiesParams): Promise<Ex
     const {
         text,
         entityTypes = ["Person", "Organization", "Location", "Date", "Product"],
-        mode = "strong",
+        mode = "normal",
         client,
-        model = "gpt-4o-mini"
+        model,
     } = params;
 
     const strongInstructions = `
@@ -48,7 +48,7 @@ No chat.
         client,
         mode,
         instructions: {
-            strong: strongInstructions,
+            normal: strongInstructions,
             weak: weakInstructions,
         },
         prompt: text,

@@ -1,4 +1,4 @@
-Below is a **low-level spec + full README draft** for an npm package named **`nx-ai-api`** that supports:
+Below is a **low-level spec + full README draft** for an npm package named **`light-skills`** that supports:
 
 * **OpenRouter (remote)**: `instruction -> response text + usage/tokens (+ cost when provided)`
 * **Local CPU models (optional)** via **llama.cpp bindings** (GGUF) and optionally **Transformers.js** (WASM/ONNX)
@@ -7,11 +7,11 @@ OpenRouter pieces are based on their OpenAI-compatible **Chat Completions** API,
 
 ---
 
-# nx-ai-api — Detailed Spec (v1)
+# light-skills — Detailed Spec (v1)
 
 ## 0) Summary
 
-**Package name:** `nx-ai-api`
+**Package name:** `light-skills`
 **Purpose:** Minimal, consistent `ask()` API for *one-shot instructions* across:
 
 * Remote LLMs via OpenRouter Chat Completions endpoint. ([OpenRouter][1])
@@ -294,7 +294,7 @@ This backend is “no native builds” oriented. Transformers.js supports text g
 ## 8) Package layout (recommended)
 
 ```
-nx-ai-api/
+light-skills/
   src/
     index.ts
     core/
@@ -339,7 +339,7 @@ nx-ai-api/
 
 # README.md (Draft)
 
-## nx-ai-api
+## light-skills
 
 One tiny API for **remote LLMs (OpenRouter)** and **local CPU LLMs (GGUF via llama.cpp)**:
 
@@ -357,13 +357,13 @@ OpenRouter uses an OpenAI-compatible Chat Completions endpoint and returns a usa
 ### Base (OpenRouter only)
 
 ```bash
-npm i nx-ai-api
+npm i light-skills
 ```
 
 ### Local CPU (GGUF) support
 
 ```bash
-npm i nx-ai-api node-llama-cpp
+npm i light-skills node-llama-cpp
 ```
 
 `node-llama-cpp` provides Node.js bindings for `llama.cpp` to run GGUF models locally. ([npm][2])
@@ -371,7 +371,7 @@ npm i nx-ai-api node-llama-cpp
 ### Optional: Transformers.js backend
 
 ```bash
-npm i nx-ai-api @huggingface/transformers
+npm i light-skills @huggingface/transformers
 ```
 
 Transformers.js supports text generation tasks in JS/Node environments. ([Hugging Face][8])
@@ -394,7 +394,7 @@ OpenRouter uses `Authorization: Bearer <key>`. Attribution can be set via `HTTP-
 ### 2) Use it
 
 ```ts
-import { createClient } from "nx-ai-api";
+import { createClient } from "light-skills";
 
 const ai = createClient({ backend: "openrouter" });
 
@@ -435,7 +435,7 @@ Get a `.gguf` file (quantized models are typical for CPU use). Place it somewher
 ### 3) Use it
 
 ```ts
-import { createClient } from "nx-ai-api";
+import { createClient } from "light-skills";
 
 const ai = createClient({
   backend: "llama-cpp",
@@ -582,7 +582,7 @@ OpenRouter documents `max_tokens` as deprecated and recommends `max_completion_t
 
 ### Will token counts match between OpenRouter and local?
 
-No. Tokenization varies by model/backend. `nx-ai-api` normalizes the *shape* of usage; the numbers are backend-specific.
+No. Tokenization varies by model/backend. `light-skills` normalizes the *shape* of usage; the numbers are backend-specific.
 
 ---
 

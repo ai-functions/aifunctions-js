@@ -1,8 +1,11 @@
 import { callAI } from "../callAI.js";
+import type { Client, LlmMode } from "../../src/index.js";
 
 export interface ClusterParams {
     items: any[];
     numClusters?: number;
+    mode?: LlmMode;
+    client?: Client;
     model?: string;
 }
 
@@ -19,7 +22,7 @@ export interface ClusterResult {
  * Groups a list of items into semantic clusters.
  */
 export async function cluster(params: ClusterParams): Promise<ClusterResult> {
-    const { items, numClusters, model = "gpt-4o-mini" } = params;
+    const { items, numClusters, mode = "normal", client, model } = params;
 
     const instructions = `
 Group the following items into semantic clusters. 
@@ -35,9 +38,11 @@ ${JSON.stringify(items, null, 2)}
     `.trim();
 
     const result = await callAI<ClusterResult>({
-        model,
-        instructions: { weak: instructions, strong: instructions },
+        client,
+        mode,
+        instructions: { weak: instructions, normal: instructions },
         prompt: userPrompt,
+        model,
     });
 
     return result.data;

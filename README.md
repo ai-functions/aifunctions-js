@@ -1,4 +1,4 @@
-# nx-ai-api
+# light-skills
 
 One tiny API for **remote LLMs (OpenRouter)** and **local CPU LLMs (GGUF via llama.cpp)**:
 
@@ -17,13 +17,13 @@ OpenRouter uses an OpenAI-compatible Chat Completions endpoint and returns a usa
 ### Base (OpenRouter only)
 
 ```bash
-npm i nx-ai-api
+npm i light-skills
 ```
 
 ### Local CPU (GGUF) support
 
 ```bash
-npm i nx-ai-api node-llama-cpp
+npm i light-skills node-llama-cpp
 ```
 
 `node-llama-cpp` provides Node.js bindings for `llama.cpp` to run GGUF models locally.
@@ -31,7 +31,7 @@ npm i nx-ai-api node-llama-cpp
 ### Optional: Transformers.js backend
 
 ```bash
-npm i nx-ai-api @huggingface/transformers
+npm i light-skills @huggingface/transformers
 ```
 
 Transformers.js supports text generation tasks in JS/Node environments.
@@ -52,7 +52,7 @@ OPENROUTER_APP_NAME=My App
 ### 2) Use it
 
 ```ts
-import { createClient } from "nx-ai-api";
+import { createClient } from "light-skills";
 
 const ai = createClient({ backend: "openrouter" });
 
@@ -91,7 +91,7 @@ LLAMA_CPP_THREADS=6
 ### 4) Use it
 
 ```ts
-import { createClient } from "nx-ai-api";
+import { createClient } from "light-skills";
 
 // If variables are in .env, no need to pass llamaCpp config:
 const ai = createClient({ backend: "llama-cpp" });
@@ -221,19 +221,23 @@ All errors throw `NxAiApiError`:
 
 ---
 
-## Library Functions (`nx-ai-api/functions`)
+## Library Functions (`light-skills/functions`)
 
-`nx-ai-api` ships a set of utility functions for guaranteed JSON output from an LLM — importable via the `nx-ai-api/functions` sub-path.
+`light-skills` ships a set of utility functions for guaranteed JSON output from an LLM — importable via the `light-skills/functions` sub-path.
 
 ### Features
 
 - **Guaranteed JSON**: Instructions and sanitization ensure parseable JSON.
 - **Type Safe**: Strong typing of LLM responses.
-- **Mode**: `matchLists`, `extractTopics`, `extractEntities`, `summarize`, and `classify` accept optional `mode?: "weak" | "strong"`. Default is `"strong"`. Use `"weak"` for smaller or local models (shorter instructions, lower temperature).
+- **Mode**: Functions accept optional `mode?: "weak" | "normal" | "strong"`. Default is `"normal"`. Presets:
+  - **weak** — local backend (llama-cpp by default); no API key required. Default model: Llama 2.0 via a GGUF at `LLAMA_CPP_MODEL_PATH` (default `./models/model.gguf`). Shorter instructions, lower temperature.
+  - **normal** — OpenRouter with default model `gpt-5-nano`; requires `OPENROUTER_API_KEY`.
+  - **strong** — OpenRouter with default model `gpt-5.2`; requires `OPENROUTER_API_KEY`.
+  You can override by passing a custom `client` or `model`; explicit options always win over the preset.
 
 ### Setup
 
-Library functions use the **OpenRouter** client by default. Set `OPENROUTER_API_KEY` in your `.env`, or pass a custom `client` (e.g. from `createClient({ backend: "llama-cpp" })`).
+When you omit `client`, the default depends on `mode`: **weak** uses the local backend (no key); **normal** and **strong** use OpenRouter (set `OPENROUTER_API_KEY` in `.env`). Or pass a custom `client` (e.g. `createClient({ backend: "llama-cpp" })`).
 
 ```env
 OPENROUTER_API_KEY=sk-or-...
@@ -247,18 +251,61 @@ npm i dotenv
 
 ---
 
-### `matchLists` — Semantic List Matching
+### JSON helpers
 
-Intelligently matches items from two lists based on semantic similarity and naming.
+For robust JSON from model output or when you need a single-JSON guarantee:
+
+- **`extractFirstJson(text)`** — Deterministic: finds the first brace-balanced `{...}` in a string and parses it. Returns `{ ok: true, data }` or `{ ok: false, errorCode, message }`. Use when the model may have wrapped JSON in markdown or prose.
+- **`parseJsonResponse(text, options?)`** — Runs `extractFirstJson` on `text`. If that fails and `options.llmFallback === true`, calls the LLM to extract the JSON from the text, then extracts again from the LLM output. Returns `{ ok: true, json }` or `{ ok: false, errorCode, message }`.
+- **`askJson<T>(params)`** — LLM call with an explicit "single JSON object only" guarantee. Params: `prompt`, `instructions: { weak, normal, strong? }`, optional `outputContract`, `requiredOutputShape`, `client`, `mode`, `model`. Returns `CallAIResult<T>`.
 
 ```ts
-import { matchLists } from "nx-ai-api/functions";
+import { extractFirstJson, parseJsonResponse, askJson } from "light-skills/functions";
+
+const r1 = extractFirstJson("Some text then {\"a\": 1} more.");
+// r1.ok && r1.data === { a: 1 }
+
+const r2 = await parseJsonResponse(mixedText, { llmFallback: true });
+// r2.ok && use r2.json
+
+const r3 = await askJson<{ summary: string }>({
+  prompt: "Summarize in one sentence.",
+  instructions: { weak: "JSON only.", normal: "Return a single JSON object." },
+  outputContract: "Object with key 'summary' (string).",
+});
+// r3.data.summary
+```
+
+### `ask` (ai.ask) — Generic instruction skill
+
+Generic "do what the instruction says" skill. Builds INPUT_MD from instruction, output contract, and optional input data; returns parsed JSON. Runnable by name as `ai.ask`.
+
+```ts
+import { ask, run } from "light-skills/functions";
+
+const data = await ask({
+  instruction: "Extract the main topic and two sub-topics from the input.",
+  outputContract: "Single JSON object with keys 'main' (string) and 'subTopics' (string[]).",
+  inputData: { text: "Long article..." },
+});
+// or: run("ai.ask", { instruction: "...", outputContract: "...", inputData: {...} })
+```
+
+---
+
+### `matchLists` — Semantic List Matching
+
+Intelligently matches items from two lists based on semantic similarity and naming. Pass **`existingMatches`** from a previous run to avoid re-matching: list1 items already in `existingMatches` are skipped, only the rest are sent to the model, and results are merged so you get no doubles and no crash — safe to call as new records arrive.
+
+```ts
+import { matchLists } from "light-skills/functions";
 
 const result = await matchLists({
   list1: source,
   list2: target,
   guidance: "Match by name, accepting close variants.",
-  mode: "strong",  // optional: "weak" | "strong"
+  existingMatches: previousRun.matches,  // optional: skip already-mapped list1 items
+  mode: "normal",  // optional: "weak" | "normal" | "strong"
 });
 ```
 
@@ -269,12 +316,12 @@ const result = await matchLists({
 Extracts key topics from the provided text.
 
 ```ts
-import { extractTopics } from "nx-ai-api/functions";
+import { extractTopics } from "light-skills/functions";
 
 const { topics } = await extractTopics({ 
   text: "Very long article about space exploration and NASA's next missions...",
   maxTopics: 3,
-  mode: "strong",  // optional: "weak" | "strong"
+  mode: "normal",  // optional: "weak" | "normal" | "strong"
 });
 ```
 
@@ -285,11 +332,11 @@ const { topics } = await extractTopics({
 Extracts named entities (People, Organizations, Locations, etc.) from the text.
 
 ```ts
-import { extractEntities } from "nx-ai-api/functions";
+import { extractEntities } from "light-skills/functions";
 
 const { entities } = await extractEntities({ 
   text: "Apple was founded by Steve Jobs in Cupertino.",
-  mode: "strong",  // optional: "weak" | "strong"
+  mode: "normal",  // optional: "weak" | "normal" | "strong"
 });
 // [{ name: "Apple", type: "Organization" }, { name: "Steve Jobs", type: "Person" }, ...]
 ```
@@ -301,12 +348,12 @@ const { entities } = await extractEntities({
 Generates a concise summary and key points.
 
 ```ts
-import { summarize } from "nx-ai-api/functions";
+import { summarize } from "light-skills/functions";
 
 const { summary, keyPoints } = await summarize({ 
   text: "...content...",
   length: "brief",  // "brief" | "medium" | "detailed"
-  mode: "strong",   // optional: "weak" | "strong"
+  mode: "normal",   // optional: "weak" | "normal" | "strong"
 });
 ```
 
@@ -317,12 +364,12 @@ const { summary, keyPoints } = await summarize({
 Classifies text into one or more provided categories.
 
 ```ts
-import { classify } from "nx-ai-api/functions";
+import { classify } from "light-skills/functions";
 
 const { categories } = await classify({ 
   text: "I am having trouble with my subscription.",
   categories: ["Billing", "Technical Support", "General Inquiry"],
-  mode: "strong",  // optional: "weak" | "strong"
+  mode: "normal",  // optional: "weak" | "normal" | "strong"
 });
 ```
 
@@ -333,7 +380,7 @@ const { categories } = await classify({
 Analyzes the sentiment (positive, negative, or neutral).
 
 ```ts
-import { sentiment } from "nx-ai-api/functions";
+import { sentiment } from "light-skills/functions";
 
 const { sentiment: label, score } = await sentiment({ 
   text: "This is the best product ever!" 
@@ -347,7 +394,7 @@ const { sentiment: label, score } = await sentiment({
 Translates text to a target language.
 
 ```ts
-import { translate } from "nx-ai-api/functions";
+import { translate } from "light-skills/functions";
 
 const { translatedText } = await translate({ 
   text: "Hello, how are you?",
@@ -362,7 +409,7 @@ const { translatedText } = await translate({
 Ranks a list of items based on a query.
 
 ```ts
-import { rank } from "nx-ai-api/functions";
+import { rank } from "light-skills/functions";
 
 const { rankedItems } = await rank({
   items: products,
@@ -377,7 +424,7 @@ const { rankedItems } = await rank({
 Groups a list of items into semantic clusters.
 
 ```ts
-import { cluster } from "nx-ai-api/functions";
+import { cluster } from "light-skills/functions";
 
 const { clusters } = await cluster({
   items: userFeedbackList,
@@ -387,6 +434,93 @@ const { clusters } = await cluster({
 
 > [!TIP]
 > **Flexible Schema**: For list operations (`matchLists`, `rank`, `cluster`), the structure of objects in your lists does not matter. The AI uses semantic similarity across all available fields.
+
+
+---
+
+## Skill-by-name and content
+
+You can run functions by **skill name** and resolve instructions (and rules) from a configurable content source (e.g. nx-content with a Git or local backend).
+
+### Run by skill name (direct)
+
+```ts
+import { run, getSkillNames } from "light-skills/functions";
+
+const result = await run("extractTopics", {
+  text: "Long article...",
+  maxTopics: 5,
+  mode: "normal",
+});
+// result has the same shape as extractTopics()
+getSkillNames(); // ["matchLists", "extractTopics", ...]
+```
+
+### Run with content-resolved instructions
+
+When skill instructions live in your content store, use `runWithContent` with a resolver (from `getSkillsResolver`). Instructions and optional rules are loaded by skill key and mode (weak/normal/strong). See [Content-based skills catalog](docs/CONTENT_SKILLS.md) for a list of content-resolved skills (e.g. judge, compare, fixInstructions, generateRule) and which are orchestration-only.
+
+```ts
+import { getSkillsResolver } from "light-skills";
+import { runWithContent } from "light-skills/functions";
+
+const resolver = getSkillsResolver();
+// Override: getSkillsResolver({ localRoot: "./.content" }) or pass gitRepoUrl/gitToken
+
+const result = await runWithContent(
+  "extractTopics",
+  { text: "...", mode: "normal" },
+  { resolver }
+);
+```
+
+You can override the content source via `getSkillsResolver(options)`: e.g. `localRoot`, `gitRepoUrl`, `gitToken`, or `mode` (dev/prod).
+
+### Resolve instructions and rules by key
+
+```ts
+import {
+  getSkillsResolver,
+  resolveSkillInstructions,
+  resolveSkillRules,
+} from "light-skills";
+
+const resolver = getSkillsResolver();
+const systemText = await resolveSkillInstructions(resolver, "ai.judge.v1", "normal");
+const rules = await resolveSkillRules(resolver, "ai.judge.v1");
+```
+
+### Publishing skill content
+
+To push skill content (instructions and rules) to your configured content backend, use `pushSkillsContent({ localPath })`. The directory at `localPath` must be a Git repo with the remote set. Set `SKILLS_PUBLISHER_TOKEN` or `GITHUB_TOKEN` in your environment (or use SSH) so push has write access. Never commit tokens; see `.env.example`.
+
+```ts
+import { pushSkillsContent } from "light-skills";
+
+const { committed, pushed } = await pushSkillsContent({
+  localPath: "./.content",
+  message: "chore: update skill content",
+});
+```
+
+### Test, sync instructions, and push (one command)
+
+To **test all skill functions**, **write current skill instructions** from the codebase into `.content`, and **push to the skills repo** in one go, use the `content:sync` script. It uses nx-content’s local backend and `pushToRemote()`. Pushing to git is **on by default** (automated); use `--no-push` to sync locally only (e.g. to review after an optimization step).
+
+1. Builds the project and writes instruction files for every built-in skill (extractTopics, matchLists, summarize, etc.) into `.content` using the default instruction manifest.
+2. Runs the full test suite (`npm test`). If tests fail, it does not push.
+3. By default, commits and pushes `.content` to the remote (`DEFAULT_SKILLS_REPO_URL`). Pass `--no-push` to skip the push.
+
+If `.content` does not exist, the script creates it and runs `git init` and `git remote add origin <skills-repo-url>`.
+
+```bash
+npm run content:sync
+```
+
+- **Skip tests:** `npm run content:sync:no-test` or `npx tsx scripts/testOptimizeAndPush.ts -- --skip-tests`.
+- **Skip push (local-only):** `npx tsx scripts/testOptimizeAndPush.ts -- --no-push` or `--push=false`. Use after optimization if you want to review before pushing the best version or rules.
+
+Requires `SKILLS_PUBLISHER_TOKEN` or `GITHUB_TOKEN` for push (HTTPS). Add `.content/` to `.gitignore` if you don’t want to commit the local content clone.
 
 
 ---
@@ -420,5 +554,5 @@ OpenRouter recommends `max_completion_tokens`; `max_tokens` is deprecated.
 
 ### Will token counts match between OpenRouter and local?
 
-No. Tokenization varies by model/backend. `nx-ai-api` normalizes the *shape* of usage; the numbers are backend-specific.
+No. Tokenization varies by model/backend. `light-skills` normalizes the *shape* of usage; the numbers are backend-specific.
 

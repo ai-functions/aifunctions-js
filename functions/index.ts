@@ -1,6 +1,6 @@
 /**
- * AI utility functions for nx-ai-api.
- * Importable via: import { ... } from "nx-ai-api/functions"
+ * AI utility functions for light-skills.
+ * Importable via: import { ... } from "light-skills/functions"
  */
 
 export { matchLists } from "./list-matcher/matchLists.js";
@@ -31,4 +31,24 @@ export { cluster } from "./list-operations/cluster.js";
 export type { ClusterParams, ClusterResult, Cluster } from "./list-operations/cluster.js";
 
 export { callAI, callAIStream } from "./callAI.js";
-export type { CallAIParams, CallAIResult } from "./callAI.js";
+export type { CallAIParams, CallAIResult, LlmMode } from "./callAI.js";
+
+export { extractFirstJson } from "./jsonHelpers.js";
+export type { ExtractFirstJsonResult, ExtractFirstJsonSuccess, ExtractFirstJsonFailure } from "./jsonHelpers.js";
+
+export { parseJsonResponse } from "./parseJsonResponse.js";
+export type {
+    ParseJsonResponseOptions,
+    ParseJsonResponseResult,
+    ParseJsonResponseSuccess,
+    ParseJsonResponseFailure,
+} from "./parseJsonResponse.js";
+
+export { askJson } from "./askJson.js";
+export type { AskJsonParams } from "./askJson.js";
+
+export { ask } from "./ai/ask.js";
+export type { AskParams } from "./ai/ask.js";
+
+export { run, runWithContent, getSkillNames } from "./router.js";
+export type { ContentSkillMode, RunWithContentOptions } from "./router.js";

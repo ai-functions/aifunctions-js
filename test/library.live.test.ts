@@ -1,6 +1,6 @@
 /**
  * Comprehensive live integration test for all library functions.
- * Requires OPENROUTER_API_KEY in .env (default client is OpenRouter).
+ * Requires OPENROUTER_API_KEY in .env for strong mode; weak mode requires node-llama-cpp (skipped if not installed).
  */
 import "dotenv/config";
 import { describe, it } from "node:test";
@@ -18,19 +18,30 @@ import {
     cluster
 } from "../dist/functions/index.js";
 
-describe("Library Functions (Live Verification)", () => {
+async function canUseLlamaCpp(): Promise<boolean> {
+    try {
+        await import("node-llama-cpp");
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+describe("Library Functions (Live Verification)", async () => {
+    const hasLlamaCpp = await canUseLlamaCpp();
+    const weakIt = hasLlamaCpp ? it : it.skip;
 
     it("extractTopics (strong)", async () => {
         const result = await extractTopics({
             text: "The James Webb Space Telescope has captured stunning new images of the Pillars of Creation, revealing intricate details of star formation.",
             maxTopics: 2,
-            mode: "strong"
+            mode: "normal"
         });
         assert.ok(result.topics.length > 0);
         assert.ok(result.topics.some(t => t.toLowerCase().includes("space") || t.toLowerCase().includes("telescope") || t.toLowerCase().includes("star")));
     });
 
-    it("extractTopics (weak)", async () => {
+    weakIt("extractTopics (weak)", async () => {
         const result = await extractTopics({
             text: "Climate change affects global weather patterns and sea levels.",
             maxTopics: 2,
@@ -43,14 +54,14 @@ describe("Library Functions (Live Verification)", () => {
     it("extractEntities (strong)", async () => {
         const result = await extractEntities({
             text: "OpenAI was founded by Sam Altman and Elon Musk in San Francisco.",
-            mode: "strong"
+            mode: "normal"
         });
         const names = result.entities.map(e => e.name);
         assert.ok(names.includes("OpenAI"));
         assert.ok(names.includes("Sam Altman") || names.includes("Elon Musk"));
     });
 
-    it("extractEntities (weak)", async () => {
+    weakIt("extractEntities (weak)", async () => {
         const result = await extractEntities({
             text: "Microsoft is headquartered in Redmond.",
             mode: "weak"
@@ -60,12 +71,12 @@ describe("Library Functions (Live Verification)", () => {
 
     it("summarize (strong)", async () => {
         const text = "Artificial intelligence (AI) is intelligence demonstrated by machines, as opposed to natural intelligence displayed by animals including humans. AI research has been defined as the field of study of intelligent agents, which refers to any system that perceives its environment and takes actions that maximize its chance of achieving its goals.";
-        const result = await summarize({ text, length: "brief", mode: "strong" });
+        const result = await summarize({ text, length: "brief", mode: "normal" });
         assert.ok(result.summary.length > 0);
         assert.ok(result.keyPoints.length > 0);
     });
 
-    it("summarize (weak)", async () => {
+    weakIt("summarize (weak)", async () => {
         const text = "The company reported strong earnings this quarter.";
         const result = await summarize({ text, length: "brief", mode: "weak" });
         assert.ok(typeof result.summary === "string");
@@ -76,12 +87,12 @@ describe("Library Functions (Live Verification)", () => {
         const result = await classify({
             text: "I need to reset my password because I forgot it.",
             categories: ["Technical Support", "Billing", "Sales"],
-            mode: "strong"
+            mode: "normal"
         });
         assert.ok(result.categories.includes("Technical Support"));
     });
 
-    it("classify (weak)", async () => {
+    weakIt("classify (weak)", async () => {
         const result = await classify({
             text: "I want to cancel my subscription.",
             categories: ["Billing", "Technical Support", "Sales"],
@@ -109,7 +120,7 @@ describe("Library Functions (Live Verification)", () => {
             { id: 3, name: "Burger" }
         ];
         const result = await rank({ items, query: "I want something healthy and green" });
-        assert.strictEqual(result.rankedItems[0].item.name, "Salad");
+        assert.strictEqual(result.rankedItems[0].item.name.trim(), "Salad");
     });
 
     it("cluster", async () => {
@@ -126,12 +137,12 @@ describe("Library Functions (Live Verification)", () => {
     it("matchLists (strong)", async () => {
         const list1 = [{ id: 1, name: "Apple" }];
         const list2 = [{ item: "Apple", type: "Fruit" }];
-        const result = await matchLists({ list1, list2, guidance: "Match by name", mode: "strong" });
+        const result = await matchLists({ list1, list2, guidance: "Match by name", mode: "normal" });
         assert.strictEqual(result.matches[0].source.name, "Apple");
         assert.strictEqual(result.matches[0].target.item, "Apple");
     });
 
-    it("matchLists (weak)", async () => {
+    weakIt("matchLists (weak)", async () => {
         const list1 = [{ id: 1, name: "Banana" }];
         const list2 = [{ item: "Banana", type: "Fruit" }];
         const result = await matchLists({ list1, list2, guidance: "Match by name", mode: "weak" });

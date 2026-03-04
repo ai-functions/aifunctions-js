@@ -1,11 +1,11 @@
 import { callAI } from "../callAI.js";
-import type { Client } from "../../src/index.js";
+import type { Client, LlmMode } from "../../src/index.js";
 
 export interface ClassifyParams {
     text: string;
     categories: string[];
     allowMultiple?: boolean;
-    mode?: "weak" | "strong";
+    mode?: LlmMode;
     client?: Client;
     model?: string;
 }
@@ -19,7 +19,7 @@ export interface ClassifyResult {
  * Classifies text into one or more provided categories.
  */
 export async function classify(params: ClassifyParams): Promise<ClassifyResult> {
-    const { text, categories, allowMultiple = false, mode = "strong", client, model = "gpt-4o-mini" } = params;
+    const { text, categories, allowMultiple = false, mode = "normal", client, model } = params;
 
     const strongInstructions = `
 Classify text into categories: ${categories.join(", ")}.
@@ -36,8 +36,8 @@ JSON ONLY: {"categories": ["..."]}
         client,
         mode,
         instructions: {
-            strong: strongInstructions,
             weak: weakInstructions,
+            normal: strongInstructions,
         },
         prompt: text,
         model,

@@ -11,9 +11,24 @@ export type {
   Usage,
   StreamChunk,
   CreateClientOptions,
+  LlmMode,
 } from "./core/types.js";
+export { getModePreset } from "./core/modePreset.js";
+export type { ModePreset } from "./core/modePreset.js";
 export { NxAiApiError } from "./core/errors.js";
 export type { NxAiApiErrorCode } from "./core/errors.js";
+
+export {
+  getSkillsResolver,
+  resolveSkillInstructions,
+  resolveSkillRules,
+  skillInstructionsKeyForMode,
+  skillRulesKey,
+} from "./content/skillsResolver.js";
+export type { SkillsResolverOptions, SkillMode } from "./content/skillsResolver.js";
+export { DEFAULT_SKILLS_REPO_URL, DEFAULT_SKILLS_BRANCH } from "./content/skillsRepo.js";
+export { pushSkillsContent } from "./content/publishSkills.js";
+export type { PushSkillsContentOptions } from "./content/publishSkills.js";
 
 export function createClient(config: CreateClientOptions): Client {
   switch (config.backend) {

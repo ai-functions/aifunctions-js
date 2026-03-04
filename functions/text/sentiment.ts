@@ -1,7 +1,10 @@
 import { callAI } from "../callAI.js";
+import type { Client, LlmMode } from "../../src/index.js";
 
 export interface SentimentParams {
     text: string;
+    mode?: LlmMode;
+    client?: Client;
     model?: string;
 }
 
@@ -21,12 +24,14 @@ Respond in JSON format with keys: "sentiment" and "score".
  * Analyzes the sentiment of the provided text.
  */
 export async function sentiment(params: SentimentParams): Promise<SentimentResult> {
-    const { text, model = "gpt-4o-mini" } = params;
+    const { text, mode = "normal", client, model } = params;
 
     const result = await callAI<SentimentResult>({
-        model,
-        instructions: { weak: instructions, strong: instructions },
+        client,
+        mode,
+        instructions: { weak: instructions, normal: instructions },
         prompt: text,
+        model,
     });
 
     return result.data;

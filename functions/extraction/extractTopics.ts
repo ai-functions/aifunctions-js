@@ -1,10 +1,10 @@
 import { callAI } from "../callAI.js";
-import type { Client } from "../../src/index.js";
+import type { Client, LlmMode } from "../../src/index.js";
 
 export interface ExtractTopicsParams {
     text: string;
     maxTopics?: number;
-    mode?: "weak" | "strong";
+    mode?: LlmMode;
     client?: Client;
     model?: string;
 }
@@ -17,7 +17,7 @@ export interface ExtractTopicsResult {
  * Extracts key topics from the provided text.
  */
 export async function extractTopics(params: ExtractTopicsParams): Promise<ExtractTopicsResult> {
-    const { text, maxTopics = 5, mode = "strong", client, model = "gpt-4o-mini" } = params;
+    const { text, maxTopics = 5, mode = "normal", client, model } = params;
 
     const strongInstructions = `
 Extract the most important topics from the provided text.
@@ -35,8 +35,8 @@ No explanation.
         client,
         mode,
         instructions: {
-            strong: strongInstructions,
             weak: weakInstructions,
+            normal: strongInstructions,
         },
         prompt: text,
         model,
