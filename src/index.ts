@@ -20,12 +20,31 @@ export type { NxAiApiErrorCode } from "./core/errors.js";
 
 export {
   getSkillsResolver,
+  getSkillNamesFromContent,
+  getSkillInstructions,
+  setSkillInstructions,
+  getSkillRules,
+  setSkillRules,
+  getSkillInstructionVersions,
+  getSkillRulesVersions,
+  getSkillInstructionsAtRef,
+  getSkillRulesAtRef,
+  setSkillInstructionsActiveVersion,
+  setSkillRulesActiveVersion,
   resolveSkillInstructions,
   resolveSkillRules,
   skillInstructionsKeyForMode,
   skillRulesKey,
+  skillInstructionsFileKey,
+  skillRulesFileKey,
 } from "./content/skillsResolver.js";
-export type { SkillsResolverOptions, SkillMode } from "./content/skillsResolver.js";
+export type {
+  SkillsResolverOptions,
+  SkillMode,
+  SkillRule,
+  SkillVersionEntry,
+  SetActiveVersionOptions,
+} from "./content/skillsResolver.js";
 export { DEFAULT_SKILLS_REPO_URL, DEFAULT_SKILLS_BRANCH } from "./content/skillsRepo.js";
 export { pushSkillsContent } from "./content/publishSkills.js";
 export type { PushSkillsContentOptions } from "./content/publishSkills.js";

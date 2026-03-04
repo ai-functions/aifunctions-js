@@ -38,6 +38,7 @@
     "lint": "eslint src test --ext .ts",
     "test": "node --test test/**/*.test.ts",
     "content:sync": "npm run build && tsx scripts/testOptimizeAndPush.ts",
+    "content:sync:optimize": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --optimize",
     "content:sync:no-test": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --skip-tests"
   },
   "engines": {
@@ -71,7 +72,7 @@
     "url": "https://github.com/nx-intelligence/light-skills/issues"
   },
   "dependencies": {
-    "nx-content": "^1.2.2",
+    "nx-content": "^1.2.4",
     "simple-git": "^3.22.0",
     "x-llm": "^1.1.3"
   }

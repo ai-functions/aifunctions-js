@@ -1,4 +1,6 @@
-import { callAI } from "../callAI.js";
+import { type SkillRunOptions } from "../callAI.js";
+import { executeSkill } from "../core/executor.js";
+import type { SkillInstructions } from "../core/types.js";
 import type { Client, LlmMode } from "../../src/index.js";
 
 export interface RankParams {
@@ -19,31 +21,27 @@ export interface RankResult {
     rankedItems: RankedItem[];
 }
 
-/**
- * Ranks a list of items based on a query or specific criteria.
- */
-export async function rank(params: RankParams): Promise<RankResult> {
-    const { items, query, mode = "normal", client, model } = params;
-
-    const instructions = `
-Rank the following items based on their relevance to this query: "${query}".
+function instructions(query: string): SkillInstructions {
+    const base = `Rank the following items based on their relevance to this query: "${query}".
 For each item, provide a relevance score between 0 and 1 and a brief reason.
 Respond in JSON format with a "rankedItems" array.
-Maintain the full original objects in the "item" field.
-    `.trim();
+Maintain the full original objects in the "item" field.`;
+    return { weak: base.trim(), normal: base.trim() };
+}
 
-    const userPrompt = `
-Items to rank:
-${JSON.stringify(items, null, 2)}
-    `.trim();
-
-    const result = await callAI<RankResult>({
+/**
+ * Ranks a list of items based on a query or specific criteria.
+ * When run via run() with a resolver, opts.rules from content are applied automatically.
+ */
+export async function rank(params: RankParams, opts?: SkillRunOptions): Promise<RankResult> {
+    const { items, query, mode = "normal", client, model } = params;
+    return executeSkill<RankResult>({
+        request: params,
+        buildPrompt: (req) => `Items to rank:\n${JSON.stringify((req as RankParams).items, null, 2)}`,
+        instructions: instructions(query),
+        rules: opts?.rules,
         client,
         mode,
-        instructions: { weak: instructions, normal: instructions },
-        prompt: userPrompt,
         model,
     });
-
-    return result.data;
 }

@@ -1,4 +1,6 @@
-import { callAI } from "../callAI.js";
+import { type SkillRunOptions } from "../callAI.js";
+import { executeSkill } from "../core/executor.js";
+import type { SkillInstructions } from "../core/types.js";
 import type { Client, LlmMode } from "../../src/index.js";
 
 export interface MatchListsParams {
@@ -29,14 +31,36 @@ export interface MatchListsResult {
     unmatched: any[];
 }
 
-/**
- * Intelligently matches items from two lists based on naming and context.
- */
 function sourceKey(obj: unknown): string {
     return JSON.stringify(obj);
 }
 
-export async function matchLists(params: MatchListsParams): Promise<MatchListsResult> {
+function instructions(guidance: string, additionalInstructions?: string): SkillInstructions {
+    const extra = additionalInstructions ? `\nAdditional Instructions: ${additionalInstructions}` : "";
+    return {
+        weak: `Match List 1 to List 2.
+Guidance: ${guidance}
+Output JSON ONLY:
+{"matches": [{"source": object, "target": object, "reason": "string"}], "unmatched": []}
+No explanation outside JSON. Use exact objects for source/target. Each List 2 item at most once.`.trim(),
+        normal: `You are an AI assistant specialized in matching items from two lists based on naming and semantic similarity.
+Your goal is to find the best match for each item in the first list from the second list.
+Strictly follow the user's guidance for matching criteria.
+Ignore arbitrary IDs (like UUIDs) unless clearly shared.
+Do not match the same List 2 item to more than one List 1 item.
+Output your response in valid JSON:
+{
+    "matches": [{"source": <full object from list1>, "target": <full object from list2>, "reason": "..."}],
+    "unmatched": [<full objects from list1 with no match>]
+}${extra}`.trim(),
+    };
+}
+
+/**
+ * Intelligently matches items from two lists based on naming and context.
+ * When run via run() with a resolver, opts.rules from content are applied automatically.
+ */
+export async function matchLists(params: MatchListsParams, opts?: SkillRunOptions): Promise<MatchListsResult> {
     const {
         list1,
         list2,
@@ -55,47 +79,22 @@ export async function matchLists(params: MatchListsParams): Promise<MatchListsRe
         return { matches: [...existingMatches], unmatched: [] };
     }
 
-    const strongInstructions = `
-You are an AI assistant specialized in matching items from two lists based on naming and semantic similarity.
-Your goal is to find the best match for each item in the first list from the second list.
-Strictly follow the user's guidance for matching criteria.
-Ignore arbitrary IDs (like UUIDs) unless clearly shared.
-Do not match the same List 2 item to more than one List 1 item.
-Output your response in valid JSON:
-{
-    "matches": [{"source": <full object from list1>, "target": <full object from list2>, "reason": "..."}],
-    "unmatched": [<full objects from list1 with no match>]
-}
-${additionalInstructions ? `Additional Instructions: ${additionalInstructions}` : ""}
-    `.trim();
-
-    const weakInstructions = `
-Match List 1 to List 2. 
-Guidance: ${guidance}
-Output JSON ONLY:
-{"matches": [{"source": object, "target": object, "reason": "string"}], "unmatched": []}
-No explanation outside JSON. Use exact objects for source/target. Each List 2 item at most once.
-    `.trim();
-
-    const userPrompt = `
-List 1: ${JSON.stringify(list1ToMatch)}
-List 2: ${JSON.stringify(list2)}
-Guidance: ${guidance}
-    `.trim();
-
-    const result = await callAI<MatchListsResult>({
+    const payload = { list1ToMatch, list2, guidance };
+    const result = await executeSkill<MatchListsResult>({
+        request: payload,
+        buildPrompt: (req) => {
+            const p = req as { list1ToMatch: any[]; list2: any[]; guidance: string };
+            return `List 1: ${JSON.stringify(p.list1ToMatch)}\nList 2: ${JSON.stringify(p.list2)}\nGuidance: ${p.guidance}`;
+        },
+        instructions: instructions(guidance, additionalInstructions),
+        rules: opts?.rules,
         client,
         mode,
-        instructions: {
-            weak: weakInstructions,
-            normal: strongInstructions,
-        },
-        prompt: userPrompt,
         model,
     });
 
     return {
-        matches: [...existingMatches, ...result.data.matches],
-        unmatched: result.data.unmatched,
+        matches: [...existingMatches, ...result.matches],
+        unmatched: result.unmatched,
     };
 }

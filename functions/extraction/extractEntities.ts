@@ -1,4 +1,6 @@
-import { callAI } from "../callAI.js";
+import { type SkillRunOptions } from "../callAI.js";
+import { executeSkill } from "../core/executor.js";
+import type { SkillInstructions } from "../core/types.js";
 import type { Client, LlmMode } from "../../src/index.js";
 
 export interface ExtractEntitiesParams {
@@ -19,10 +21,23 @@ export interface ExtractEntitiesResult {
     entities: Entity[];
 }
 
+function instructions(entityTypes: string[]): SkillInstructions {
+    return {
+        weak: `Extract entities: ${entityTypes.join(", ")}.
+JSON ONLY: {"entities": [{"name": "...", "type": "..."}]}
+No chat.`.trim(),
+        normal: `Extract named entities from the text.
+Focus on: ${entityTypes.join(", ")}.
+For each, provide name, type, and brief context.
+Respond in JSON: {"entities": [{"name": "...", "type": "...", "context": "..."}]}`.trim(),
+    };
+}
+
 /**
  * Extracts named entities from the text.
+ * When run via run() with a resolver, opts.rules from content are applied automatically.
  */
-export async function extractEntities(params: ExtractEntitiesParams): Promise<ExtractEntitiesResult> {
+export async function extractEntities(params: ExtractEntitiesParams, opts?: SkillRunOptions): Promise<ExtractEntitiesResult> {
     const {
         text,
         entityTypes = ["Person", "Organization", "Location", "Date", "Product"],
@@ -30,30 +45,13 @@ export async function extractEntities(params: ExtractEntitiesParams): Promise<Ex
         client,
         model,
     } = params;
-
-    const strongInstructions = `
-Extract named entities from the text. 
-Focus on: ${entityTypes.join(", ")}.
-For each, provide name, type, and brief context.
-Respond in JSON: {"entities": [{"name": "...", "type": "...", "context": "..."}]}
-    `.trim();
-
-    const weakInstructions = `
-Extract entities: ${entityTypes.join(", ")}.
-JSON ONLY: {"entities": [{"name": "...", "type": "..."}]}
-No chat.
-    `.trim();
-
-    const result = await callAI<ExtractEntitiesResult>({
+    return executeSkill<ExtractEntitiesResult>({
+        request: params,
+        buildPrompt: (req) => (req as ExtractEntitiesParams).text,
+        instructions: instructions(entityTypes),
+        rules: opts?.rules,
         client,
         mode,
-        instructions: {
-            normal: strongInstructions,
-            weak: weakInstructions,
-        },
-        prompt: text,
         model,
     });
-
-    return result.data;
 }

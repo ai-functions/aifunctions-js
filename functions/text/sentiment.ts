@@ -1,4 +1,6 @@
-import { callAI } from "../callAI.js";
+import { type SkillRunOptions } from "../callAI.js";
+import { executeSkill } from "../core/executor.js";
+import type { SkillInstructions } from "../core/types.js";
 import type { Client, LlmMode } from "../../src/index.js";
 
 export interface SentimentParams {
@@ -13,26 +15,30 @@ export interface SentimentResult {
     score: number;
 }
 
-const instructions = `
-Analyze the sentiment of the provided text.
+const INSTRUCTIONS: SkillInstructions = {
+    weak: `Analyze the sentiment of the provided text.
 Classify it as "positive", "negative", or "neutral".
 Provide a confidence score between 0 and 1.
-Respond in JSON format with keys: "sentiment" and "score".
-`.trim();
+Respond in JSON format with keys: "sentiment" and "score".`.trim(),
+    normal: `Analyze the sentiment of the provided text.
+Classify it as "positive", "negative", or "neutral".
+Provide a confidence score between 0 and 1.
+Respond in JSON format with keys: "sentiment" and "score".`.trim(),
+};
 
 /**
  * Analyzes the sentiment of the provided text.
+ * When run via run() with a resolver, opts.rules from content are applied automatically.
  */
-export async function sentiment(params: SentimentParams): Promise<SentimentResult> {
+export async function sentiment(params: SentimentParams, opts?: SkillRunOptions): Promise<SentimentResult> {
     const { text, mode = "normal", client, model } = params;
-
-    const result = await callAI<SentimentResult>({
+    return executeSkill<SentimentResult>({
+        request: params,
+        buildPrompt: (req) => (req as SentimentParams).text,
+        instructions: INSTRUCTIONS,
+        rules: opts?.rules,
         client,
         mode,
-        instructions: { weak: instructions, normal: instructions },
-        prompt: text,
         model,
     });
-
-    return result.data;
 }

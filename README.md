@@ -223,7 +223,7 @@ All errors throw `NxAiApiError`:
 
 ## Library Functions (`light-skills/functions`)
 
-`light-skills` ships a set of utility functions for guaranteed JSON output from an LLM — importable via the `light-skills/functions` sub-path.
+`light-skills` ships a set of utility functions for guaranteed JSON output from an LLM — importable via the `light-skills/functions` sub-path. **Full reference:** [docs/LIBRARY.md](docs/LIBRARY.md) lists every listed (built-in) function, explains unlisted (content-based) skills, and the core helpers. **I/O and templates:** [docs/FUNCTIONS_SPEC.md](docs/FUNCTIONS_SPEC.md) defines Request/Response, Modes (weak/normal/strong), and SYSTEM / USER (`INPUT_MD`) templates for all functions (including judge, compare, fix-instructions, optimize-instructions, etc.).
 
 ### Features
 
@@ -511,16 +511,19 @@ To **test all skill functions**, **write current skill instructions** from the c
 2. Runs the full test suite (`npm test`). If tests fail, it does not push.
 3. By default, commits and pushes `.content` to the remote (`DEFAULT_SKILLS_REPO_URL`). Pass `--no-push` to skip the push.
 
-If `.content` does not exist, the script creates it and runs `git init` and `git remote add origin <skills-repo-url>`.
+If `.content` does not exist, the script **clones** the skills repo (e.g. [nx-morpheus/skills-functions](https://github.com/nx-morpheus/skills-functions)) into `.content`, so the remote’s existing files are preserved and the push adds the new `skills/` tree.
 
 ```bash
 npm run content:sync
 ```
 
+- **With optimization:** `npm run content:sync:optimize` or add `--optimize` to the script. Runs an LLM pass on each skill’s instructions (clarity/brevity), writes one **Markdown report per skill** to `reports/optimize/<skillName>.md` (original vs optimized, word counts, token usage, duration), then updates `.content` with the optimized instructions and pushes (unless `--no-push`).
 - **Skip tests:** `npm run content:sync:no-test` or `npx tsx scripts/testOptimizeAndPush.ts -- --skip-tests`.
 - **Skip push (local-only):** `npx tsx scripts/testOptimizeAndPush.ts -- --no-push` or `--push=false`. Use after optimization if you want to review before pushing the best version or rules.
 
-Requires `SKILLS_PUBLISHER_TOKEN` or `GITHUB_TOKEN` for push (HTTPS). Add `.content/` to `.gitignore` if you don’t want to commit the local content clone.
+Requires `SKILLS_PUBLISHER_TOKEN` or `GITHUB_TOKEN` for push (HTTPS). Optimization requires `OPENROUTER_API_KEY`. Add `.content/` to `.gitignore` if you don’t want to commit the local content clone.
+
+After a successful push, the remote will contain a **`skills/`** tree: e.g. `skills/extractTopics/weak.md`, `skills/extractTopics/normal.md`, `skills/matchLists/weak.md`, etc. You need write access to the repo for the push to succeed; otherwise the remote will stay empty of these files.
 
 
 ---

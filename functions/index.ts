@@ -30,8 +30,11 @@ export type { RankParams, RankResult, RankedItem } from "./list-operations/rank.
 export { cluster } from "./list-operations/cluster.js";
 export type { ClusterParams, ClusterResult, Cluster } from "./list-operations/cluster.js";
 
-export { callAI, callAIStream } from "./callAI.js";
-export type { CallAIParams, CallAIResult, LlmMode } from "./callAI.js";
+export { callAI, callAIStream, formatRulesForInstruction } from "./callAI.js";
+export type { CallAIParams, CallAIResult, CallAIRule, SkillRunOptions, LlmMode } from "./callAI.js";
+
+export { executeSkill, executeSkillStream, buildRequestPrompt } from "./core/index.js";
+export type { ExecuteSkillConfig, SkillInstructions } from "./core/index.js";
 
 export { extractFirstJson } from "./jsonHelpers.js";
 export type { ExtractFirstJsonResult, ExtractFirstJsonSuccess, ExtractFirstJsonFailure } from "./jsonHelpers.js";
@@ -50,5 +53,5 @@ export type { AskJsonParams } from "./askJson.js";
 export { ask } from "./ai/ask.js";
 export type { AskParams } from "./ai/ask.js";
 
-export { run, runWithContent, getSkillNames } from "./router.js";
-export type { ContentSkillMode, RunWithContentOptions } from "./router.js";
+export { run, runWithContent, getSkillNames, getSkillNamesAsync } from "./router.js";
+export type { ContentSkillMode, RunWithContentOptions, RunOptions } from "./router.js";

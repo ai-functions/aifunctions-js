@@ -18,8 +18,9 @@ export interface AskJsonParams<T = unknown> {
     model?: string;
 }
 
-const SINGLE_JSON_WEAK = "Respond with a single JSON object only. No markdown, no explanation.";
-const SINGLE_JSON_NORMAL = "You must respond with exactly one JSON object. Do not wrap in markdown code fences or add any text outside the object.";
+/** Single-JSON constraint (see docs/FUNCTIONS_SPEC.md § ai.askJson). */
+const SINGLE_JSON_WEAK = "Return JSON ONLY: one JSON object. First char { last char }. If impossible, return {\"error\":\"cannot_complete\",\"reason\":\"...\"}.";
+const SINGLE_JSON_NORMAL = "You are ai.askJson. Return EXACTLY ONE valid JSON object. No markdown, no code fences, no extra text. Do not invent fields unless asked.";
 
 /**
  * LLM call with an explicit "single JSON object only" guarantee. Builds the system instruction

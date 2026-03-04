@@ -90,3 +90,20 @@ Maintain the full original objects in the "items" array for each cluster.
 Respond in JSON format with a "clusters" array.`,
   },
 };
+
+/** Default rules per skill for syncing to content (skills/<name>-rules.json). Ensures git has both instructions and rules. */
+export type SkillRuleEntry = { rule: string; weight: number };
+export const DEFAULT_SKILL_RULES: Record<string, SkillRuleEntry[]> = {
+  extractTopics: [{ rule: "Output valid JSON only with a 'topics' array.", weight: 1 }],
+  extractEntities: [{ rule: "Output valid JSON only with an 'entities' array.", weight: 1 }],
+  matchLists: [
+    { rule: "Output valid JSON only with 'matches' and 'unmatched' arrays.", weight: 1 },
+    { rule: "Use exact objects from list1/list2 in source/target; do not invent fields.", weight: 1 },
+  ],
+  summarize: [{ rule: "Output valid JSON with 'summary' and 'keyPoints'.", weight: 1 }],
+  classify: [{ rule: "Output valid JSON with 'categories' (and optional 'confidence').", weight: 1 }],
+  sentiment: [{ rule: "Output valid JSON with 'sentiment' and 'score'.", weight: 1 }],
+  translate: [{ rule: "Output valid JSON with 'translatedText' and 'detectedSourceLanguage'.", weight: 1 }],
+  rank: [{ rule: "Output valid JSON with 'rankedItems' array; keep full objects in 'item' field.", weight: 1 }],
+  cluster: [{ rule: "Output valid JSON with 'clusters' array; keep full objects in 'items'.", weight: 1 }],
+};

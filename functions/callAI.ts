@@ -9,6 +9,11 @@ import {
 
 export type { LlmMode };
 
+/** Rule entry for appending to system instruction (from content or run options). */
+export type CallAIRule = { rule: string; weight: number };
+/** Options passed to skills when run() has a resolver (rules from content). */
+export type SkillRunOptions = { rules?: CallAIRule[] };
+
 export interface CallAIParams {
     client?: Client;
     mode?: LlmMode;
@@ -19,6 +24,14 @@ export interface CallAIParams {
     };
     prompt: string;
     model?: string;
+    /** Optional rules to append to the system instruction (e.g. from content). Used automatically when run() has a resolver. */
+    rules?: CallAIRule[];
+}
+
+/** Format rules for appending to system instruction. */
+export function formatRulesForInstruction(rules: CallAIRule[]): string {
+    if (!rules?.length) return "";
+    return "\n\n## Rules to follow\n" + rules.map((r) => `- ${r.rule}`).join("\n");
 }
 
 export interface CallAIResult<T> {
@@ -43,18 +56,20 @@ export async function callAI<T>(params: CallAIParams): Promise<CallAIResult<T>> 
         instructions,
         prompt,
         model: modelOverride,
+        rules,
     } = params;
 
     const preset = getModePreset(mode);
     const client = providedClient || createClient({ backend: preset.backend });
     const model =
         modelOverride ?? (preset.backend === "openrouter" ? preset.model : undefined);
-    const instruction =
+    let instruction =
         mode === "weak"
             ? instructions.weak
             : mode === "strong"
               ? (instructions.strong ?? instructions.normal)
               : instructions.normal;
+    if (rules?.length) instruction += formatRulesForInstruction(rules);
 
     const res = await client.ask(prompt, {
         system: instruction,
@@ -99,18 +114,20 @@ export async function* callAIStream(params: CallAIParams): AsyncGenerator<Stream
         instructions,
         prompt,
         model: modelOverride,
+        rules,
     } = params;
 
     const preset = getModePreset(mode);
     const client = providedClient || createClient({ backend: preset.backend });
     const model =
         modelOverride ?? (preset.backend === "openrouter" ? preset.model : undefined);
-    const instruction =
+    let instruction =
         mode === "weak"
             ? instructions.weak
             : mode === "strong"
               ? (instructions.strong ?? instructions.normal)
               : instructions.normal;
+    if (rules?.length) instruction += formatRulesForInstruction(rules);
     const opts = {
         system: instruction,
         model,

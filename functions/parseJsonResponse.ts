@@ -19,8 +19,9 @@ export type ParseJsonResponseFailure = {
 };
 export type ParseJsonResponseResult = ParseJsonResponseSuccess | ParseJsonResponseFailure;
 
-const LLM_FALLBACK_WEAK = `Extract the single JSON object from the text below. Output only that JSON object, nothing else. No markdown, no explanation.`;
-const LLM_FALLBACK_NORMAL = `You must extract the single JSON object from the following text. Output only the raw JSON object, with no markdown code fences, no explanation, and no other text.`;
+/** SYSTEM for LLM fallback (see docs/FUNCTIONS_SPEC.md § ai.parseJsonResponse). */
+const LLM_FALLBACK_WEAK = `Extract the FIRST valid JSON object from the text. Return ONLY that JSON object. First char { last char }. No markdown, no extra text.`;
+const LLM_FALLBACK_NORMAL = `Extract the FIRST valid JSON object from the text. Return ONLY that JSON object. No markdown, no extra text.`;
 
 /**
  * Deterministic extraction: finds the first brace-balanced {...} in text and parses it.

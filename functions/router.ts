@@ -1,4 +1,6 @@
-import { createClient, resolveSkillInstructions } from "../src/index.js";
+import { createClient, getSkillsResolver, getSkillNamesFromContent, resolveSkillInstructions, getSkillRules, resolveSkillRules } from "../src/index.js";
+import { executeSkill } from "./core/executor.js";
+import { buildRequestPrompt } from "./core/prompt.js";
 import type { Client } from "../src/index.js";
 import type { ContentResolver } from "nx-content";
 import { matchLists } from "./list-matcher/matchLists.js";
@@ -12,7 +14,9 @@ import { rank } from "./list-operations/rank.js";
 import { cluster } from "./list-operations/cluster.js";
 import { ask } from "./ai/ask.js";
 
-export type SkillFn = (params: unknown) => Promise<unknown>;
+/** Options passed to built-in skills when run() has a resolver (e.g. rules from content). */
+export type SkillRunOptions = { rules?: Array<{ rule: string; weight: number }> };
+export type SkillFn = (params: unknown, opts?: SkillRunOptions) => Promise<unknown>;
 
 const SKILLS = {
   matchLists,
@@ -27,24 +31,58 @@ const SKILLS = {
   "ai.ask": ask,
 } as Record<string, SkillFn>;
 
+export type RunOptions = {
+  /** Content resolver for dynamic skills (from git). When skill is not built-in, run() uses this to run via runWithContent. Default: getSkillsResolver() if skill not in registry. */
+  resolver?: ContentResolver;
+};
+
 /**
  * Run a skill by name with the given request (full params for that skill).
- * Request is passed through unchanged; must include mode, client, model, etc. as needed.
- * @throws if skill name is unknown
+ * If the skill is built-in (matchLists, extractTopics, etc.), runs the implementation.
+ * Otherwise uses the content resolver to run the skill from the repo (runWithContent).
+ * Pass options.resolver to use a custom content source; omit to use default getSkillsResolver() for dynamic skills.
  */
-export async function run(skill: string, request: unknown): Promise<unknown> {
+export async function run(
+  skill: string,
+  request: unknown,
+  options?: RunOptions
+): Promise<unknown> {
   const fn = SKILLS[skill];
-  if (!fn) {
-    throw new Error(`Unknown skill: ${skill}. Available: ${getSkillNames().join(", ")}`);
+  if (fn) {
+    let rules: Array<{ rule: string; weight: number }> = [];
+    if (options?.resolver) {
+      rules = await getSkillRules(options.resolver, skill);
+      if (rules.length === 0) rules = await resolveSkillRules(options.resolver, skill);
+    }
+    return fn(request, { rules });
   }
-  return fn(request);
+  const resolver = options?.resolver ?? getSkillsResolver();
+  const fromContent = await getSkillNamesFromContent(resolver);
+  if (!fromContent.includes(skill)) {
+    const available = [...getSkillNames(), ...fromContent];
+    throw new Error(`Unknown skill: ${skill}. Available: ${available.join(", ")}`);
+  }
+  return runWithContent(skill, request, { resolver });
 }
 
 /**
- * List registered skill names that can be passed to run().
+ * List built-in skill names (sync). Use getSkillNamesAsync(resolver) to include skills discovered from content.
  */
 export function getSkillNames(): string[] {
   return Object.keys(SKILLS);
+}
+
+/**
+ * List all skill names: built-in plus those discovered from the content resolver.
+ * Use this when you want to run or optimize whatever is in the git repo.
+ */
+export async function getSkillNamesAsync(
+  resolver?: ContentResolver
+): Promise<string[]> {
+  const builtIn = getSkillNames();
+  if (!resolver) return builtIn;
+  const fromContent = await getSkillNamesFromContent(resolver);
+  return [...new Set([...builtIn, ...fromContent])];
 }
 
 /** Mode for content-resolved instructions (weak / normal / strong). */
@@ -61,8 +99,7 @@ export type RunWithContentOptions = {
 
 /**
  * Run a skill by name using instructions (and optionally rules) resolved from content.
- * Builds INPUT_MD from request (Markdown), uses SYSTEM = resolved instructions, calls client.ask, parses JSON.
- * Use when skill instructions live in the content repo (nx-content).
+ * Uses the same executor as built-in skills for a single execution path.
  */
 export async function runWithContent(
   skillName: string,
@@ -75,33 +112,15 @@ export async function runWithContent(
   const client = providedClient ?? createClient({ backend: "openrouter" });
 
   const instruction = await resolveSkillInstructions(resolver, skillName, mode);
+  let rules = await getSkillRules(resolver, skillName);
+  if (rules.length === 0) rules = await resolveSkillRules(resolver, skillName);
 
-  const inputMd = [
-    `# ${skillName}`,
-    "",
-    "## Request",
-    "",
-    "```json",
-    JSON.stringify(request, null, 2),
-    "```",
-  ].join("\n");
-
-  const res = await client.ask(inputMd, {
-    system: instruction,
-    maxTokens: 4096,
-    temperature: mode === "weak" ? 0.1 : 0.7,
+  return executeSkill<unknown>({
+    request,
+    buildPrompt: (r) => `# ${skillName}\n\n` + buildRequestPrompt(r),
+    instructions: { weak: instruction, normal: instruction, strong: instruction },
+    rules,
+    client,
+    mode,
   });
-
-  let text = res.text.trim();
-  if (text.startsWith("```")) {
-    text = text.replace(/^```[a-z]*\n/i, "").replace(/\n```$/g, "").trim();
-  }
-
-  try {
-    return JSON.parse(text) as unknown;
-  } catch (e) {
-    throw new Error(
-      `Failed to parse response as JSON: ${text.substring(0, 500)}... Error: ${e instanceof Error ? e.message : String(e)}`
-    );
-  }
 }

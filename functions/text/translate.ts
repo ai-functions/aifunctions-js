@@ -1,4 +1,6 @@
-import { callAI } from "../callAI.js";
+import { type SkillRunOptions } from "../callAI.js";
+import { executeSkill } from "../core/executor.js";
+import type { SkillInstructions } from "../core/types.js";
 import type { Client, LlmMode } from "../../src/index.js";
 
 export interface TranslateParams {
@@ -14,26 +16,27 @@ export interface TranslateResult {
     detectedSourceLanguage?: string;
 }
 
-/**
- * Translates text to a target language.
- */
-export async function translate(params: TranslateParams): Promise<TranslateResult> {
-    const { text, targetLanguage, mode = "normal", client, model } = params;
-
-    const instructions = `
-Translate the following text into ${targetLanguage}.
+function instructions(targetLanguage: string): SkillInstructions {
+    const base = `Translate the following text into ${targetLanguage}.
 Maintain the original tone and context.
 Detect the source language and include it in your response.
-Respond in JSON format with "translatedText" and "detectedSourceLanguage".
-    `.trim();
+Respond in JSON format with "translatedText" and "detectedSourceLanguage".`;
+    return { weak: base.trim(), normal: base.trim() };
+}
 
-    const result = await callAI<TranslateResult>({
+/**
+ * Translates text to a target language.
+ * When run via run() with a resolver, opts.rules from content are applied automatically.
+ */
+export async function translate(params: TranslateParams, opts?: SkillRunOptions): Promise<TranslateResult> {
+    const { text, targetLanguage, mode = "normal", client, model } = params;
+    return executeSkill<TranslateResult>({
+        request: params,
+        buildPrompt: (req) => (req as TranslateParams).text,
+        instructions: instructions(targetLanguage),
+        rules: opts?.rules,
         client,
         mode,
-        instructions: { weak: instructions, normal: instructions },
-        prompt: text,
         model,
     });
-
-    return result.data;
 }
