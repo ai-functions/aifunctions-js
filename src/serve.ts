@@ -1,5 +1,5 @@
 /**
- * REST API server for light-skills. Run with: npm run serve
+ * REST API server for aifunctions. Run with: npm run serve
  * Exposes skill run, optimize, race, content workflows, and jobs. No UI.
  */
 import { createServer } from "node:http";
@@ -27,16 +27,18 @@ import {
   updateJob,
   appendJobLog,
   getJobLogs,
+  listJobs,
 } from "./serve/jobs.js";
-
+// API contract: https://api.aifunction.dev — standard envelope, status codes, CORS https://api.aifunction.dev — standard envelope, status codes, CORS
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const PORT = Number(process.env.PORT) || 3780;
-const MAX_CONCURRENCY = Math.max(1, Number(process.env.MAX_CONCURRENCY) || 50);
+const MAX_CONCURRENCY = Math.max(1, Number(process.env.MAX_CONCURRENCY) || 10);
+const serverStartedAt = Date.now();
 let concurrency = 0;
 const concurrencyGuard = <T>(fn: () => Promise<T>): Promise<T> => {
   if (concurrency >= MAX_CONCURRENCY) {
-    return Promise.reject(new Error("Server busy (MAX_CONCURRENCY); retry later"));
+    return Promise.reject({ code: "QUEUE_FULL", status: 503, message: "Server busy; retry later" });
   }
   concurrency++;
   return fn().finally(() => {
@@ -64,20 +66,25 @@ function readJsonBody(req: import("node:http").IncomingMessage): Promise<unknown
   });
 }
 
-const CORS = { "Access-Control-Allow-Origin": "*" };
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Content-Type, x-api-key, x-openrouter-key",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+};
 
-function send(res: import("node:http").ServerResponse, status: number, data: unknown) {
-  res.writeHead(status, { "Content-Type": "application/json", ...CORS });
-  res.end(JSON.stringify(data));
+function sendOk(res: import("node:http").ServerResponse, data: unknown) {
+  res.writeHead(200, { "Content-Type": "application/json", ...CORS_HEADERS });
+  res.end(JSON.stringify({ ok: true, data }));
 }
 
 function sendError(
   res: import("node:http").ServerResponse,
   status: number,
   message: string,
-  code?: string
+  code: string
 ) {
-  send(res, status, { error: message, code: code ?? "ERROR" });
+  res.writeHead(status, { "Content-Type": "application/json", ...CORS_HEADERS });
+  res.end(JSON.stringify({ ok: false, error: { code, message } }));
 }
 
 function parsePath(pathStr: string): { segments: string[]; name?: string; id?: string } {
@@ -95,34 +102,50 @@ async function handleRun(
   skillFromPath?: string
 ): Promise<void> {
   const skill = skillFromPath ?? (body as { skill?: string })?.skill;
-  const request = (body as { request?: unknown })?.request ?? body;
+  const rawBody = body as { input?: unknown; request?: unknown; options?: { validate?: boolean } };
+  const request = rawBody?.input ?? rawBody?.request ?? body;
+  const validateOption = rawBody?.options?.validate;
   if (typeof skill !== "string" || !skill.trim()) {
-    sendError(res, 400, "skill must be a non-empty string", "BAD_REQUEST");
+    sendError(res, 400, "skill must be a non-empty string", "INVALID_INPUT");
     return;
   }
   const resolver = getSkillsResolver();
   const validateOutput =
-    process.env.VALIDATE_SKILL_OUTPUT === "1" || process.env.VALIDATE_SKILL_OUTPUT === "true";
+    validateOption === true ||
+    process.env.VALIDATE_SKILL_OUTPUT === "1" ||
+    process.env.VALIDATE_SKILL_OUTPUT === "true";
   try {
     const out = await concurrencyGuard(() =>
       run(skill.trim(), request ?? {}, { resolver, validateOutput })
     );
     if (validateOutput && typeof out === "object" && out !== null && "validation" in out) {
-      send(res, 200, out);
+      const { result, validation } = out as { result: unknown; validation: { valid: boolean; errors?: string[] } };
+      sendOk(res, {
+        result,
+        validation: { valid: validation.valid, errors: validation.errors ?? [] },
+      });
     } else {
-      send(res, 200, { result: out });
+      sendOk(res, { result: out });
     }
-  } catch (e) {
+  } catch (e: unknown) {
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === "QUEUE_FULL" && err.status === 503) {
+      sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL");
+      return;
+    }
     const message = e instanceof Error ? e.message : String(e);
     if (message.includes("Unknown skill")) {
-      sendError(res, 404, message, "UNKNOWN_SKILL");
+      sendError(res, 404, `Skill '${skill.trim()}' not found`, "SKILL_NOT_FOUND");
     } else {
       sendError(res, 500, message, "RUN_ERROR");
     }
   }
 }
 
-async function handleSkillsList(res: import("node:http").ServerResponse): Promise<void> {
+async function handleSkillsList(
+  res: import("node:http").ServerResponse,
+  query: { tag?: string; category?: string; q?: string }
+): Promise<void> {
   try {
     const resolver = getSkillsResolver();
     const names = await getSkillNamesAsync(resolver);
@@ -132,28 +155,46 @@ async function handleSkillsList(res: import("node:http").ServerResponse): Promis
     } catch {
       // no index
     }
-    const byId = new Map<string, { $refKey: string }>();
+    const byId = new Map<string, { $refKey: string; entry?: Record<string, unknown> }>();
     if (index?.skills) {
       for (const ref of index.skills) {
         const r = ref as { $refKey: string };
         try {
           const raw = await resolver.get(r.$refKey);
-          const entry = JSON.parse(typeof raw === "string" ? raw : "{}") as { id?: string };
-          if (entry.id) byId.set(entry.id, r);
+          const entry = JSON.parse(typeof raw === "string" ? raw : "{}") as Record<string, unknown> & { id?: string };
+          if (entry.id) byId.set(entry.id as string, { $refKey: r.$refKey, entry });
         } catch {
           // skip
         }
       }
     }
-    const skills = names.map((name) => {
+    let skills = names.map((name) => {
       const meta = byId.get(name);
-      return meta
-        ? { name, version: "v1", description: "Skill from library index", tags: [] }
-        : { name, version: "v1" };
+      const entry = meta?.entry as { description?: string; category?: string; tags?: string[]; io?: unknown } | undefined;
+      return {
+        name,
+        description: entry?.description ?? "Skill from library index",
+        category: entry?.category ?? "general",
+        tags: entry?.tags ?? [],
+        modes: ["weak", "normal", "strong"],
+        version: "1.0.0",
+        input: (entry as { io?: { input?: unknown } })?.io?.input ?? { type: "object", properties: {} },
+        output: (entry as { io?: { output?: unknown } })?.io?.output ?? { type: "object", properties: {} },
+      };
     });
-    send(res, 200, { skills });
+    if (query.tag) skills = skills.filter((s) => s.tags.includes(query.tag!));
+    if (query.category) skills = skills.filter((s) => s.category === query.category);
+    if (query.q?.trim()) {
+      const q = query.q.trim().toLowerCase();
+      skills = skills.filter(
+        (s) =>
+          s.name.toLowerCase().includes(q) ||
+          (s.description && String(s.description).toLowerCase().includes(q))
+      );
+    }
+    sendOk(res, { skills });
   } catch (e) {
-    sendError(res, 500, e instanceof Error ? e.message : String(e), "SKILLS_ERROR");
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
   }
 }
 
@@ -165,10 +206,10 @@ async function handleSkillDetail(
     const resolver = getSkillsResolver();
     const names = await getSkillNamesAsync(resolver);
     if (!names.includes(name)) {
-      sendError(res, 404, `Unknown skill: ${name}`, "UNKNOWN_SKILL");
+      sendError(res, 404, `Skill '${name}' not found`, "SKILL_NOT_FOUND");
       return;
     }
-    let entry: unknown = null;
+    let entry: Record<string, unknown> | null = null;
     try {
       const index = await getLibraryIndex({ resolver, allowMissing: true });
       const ref = index.skills?.find((r) => {
@@ -177,18 +218,25 @@ async function handleSkillDetail(
       }) as { $refKey: string } | undefined;
       if (ref) {
         const raw = await resolver.get(ref.$refKey);
-        entry = JSON.parse(typeof raw === "string" ? raw : "{}");
+        entry = JSON.parse(typeof raw === "string" ? raw : "{}") as Record<string, unknown>;
       }
     } catch {
       // no index
     }
+    const instructions: Record<string, string> = { weak: "Available", strong: "Available", ultra: "Not configured" };
     if (entry && typeof entry === "object" && entry !== null) {
-      send(res, 200, entry);
+      sendOk(res, {
+        ...entry,
+        name: entry.id ?? name,
+        version: (entry as { schemaVersion?: string }).schemaVersion ?? "1.0.0",
+        examples: (entry as { examples?: unknown[] }).examples ?? [],
+        instructions,
+      });
     } else {
-      send(res, 200, { name, version: "v1" });
+      sendOk(res, { name, version: "1.0.0", examples: [], instructions });
     }
   } catch (e) {
-    sendError(res, 500, e instanceof Error ? e.message : String(e), "SKILLS_ERROR");
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
   }
 }
 
@@ -197,15 +245,14 @@ async function handleOptimizeInstructions(
   body: unknown
 ): Promise<void> {
   const b = body as {
-    rawInstructions?: string;
-    skillName?: string;
+    instructions?: string;
+    skillName?: string | null;
     mode?: "weak" | "strong";
+    examples?: unknown[];
     model?: string;
-    vendor?: string;
-    temperature?: number;
     maxTokens?: number;
   };
-  let rawInstructions = b?.rawInstructions;
+  let rawInstructions = b?.instructions;
   const skillName = typeof b?.skillName === "string" ? b.skillName : "unknown";
   const mode = b?.mode === "weak" ? "weak" : "normal";
 
@@ -213,12 +260,12 @@ async function handleOptimizeInstructions(
     const resolver = getSkillsResolver();
     rawInstructions = await getSkillInstructions(resolver, b.skillName);
     if (!rawInstructions?.trim()) {
-      sendError(res, 404, `No instructions found for skill: ${b.skillName}`, "NOT_FOUND");
+      sendError(res, 404, `No instructions found for skill: ${b.skillName}`, "SKILL_NOT_FOUND");
       return;
     }
   }
   if (typeof rawInstructions !== "string" || !rawInstructions.trim()) {
-    sendError(res, 400, "Provide rawInstructions or skillName", "BAD_REQUEST");
+    sendError(res, 400, "Provide instructions or skillName", "INVALID_INPUT");
     return;
   }
 
@@ -226,13 +273,26 @@ async function handleOptimizeInstructions(
     const result = await concurrencyGuard(() =>
       optimizeInstruction(rawInstructions!, mode, skillName, { model: b?.model })
     );
-    send(res, 200, {
+    const before = rawInstructions!.trim();
+    const after = result.optimized.trim();
+    const diff = before !== after ? `- ${before.split("\n").join("\n- ")}\n+ ${after.split("\n").join("\n+ ")}` : "";
+    sendOk(res, {
       optimizedInstructions: result.optimized,
-      tokens: result.usage,
-      validation: undefined,
+      diff: diff || undefined,
+      usage: {
+        promptTokens: result.usage.promptTokens,
+        completionTokens: result.usage.completionTokens,
+        totalTokens: result.usage.totalTokens,
+        estimatedCost: undefined,
+      },
     });
-  } catch (e) {
-    sendError(res, 500, e instanceof Error ? e.message : String(e), "OPTIMIZE_ERROR");
+  } catch (e: unknown) {
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === "QUEUE_FULL" && err.status === 503) {
+      sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL");
+      return;
+    }
+    sendError(res, 500, e instanceof Error ? (e as Error).message : String(e), "MISSING_OPTIONAL_DEP");
   }
 }
 
@@ -243,7 +303,7 @@ async function handleOptimizeSkill(
   const b = body as { skillName?: string; mode?: "weak" | "strong"; runValidation?: boolean };
   const skillName = b?.skillName;
   if (!skillName || typeof skillName !== "string") {
-    sendError(res, 400, "skillName is required", "BAD_REQUEST");
+    sendError(res, 400, "skillName is required", "INVALID_INPUT");
     return;
   }
   const resolver = getSkillsResolver();
@@ -251,7 +311,7 @@ async function handleOptimizeSkill(
   try {
     const before = await getSkillInstructions(resolver, skillName);
     if (!before?.trim()) {
-      sendError(res, 404, `No instructions for skill: ${skillName}`, "NOT_FOUND");
+      sendError(res, 404, `No instructions for skill: ${skillName}`, "SKILL_NOT_FOUND");
       return;
     }
     const result = await concurrencyGuard(() =>
@@ -261,14 +321,19 @@ async function handleOptimizeSkill(
     const validationSummary = b?.runValidation
       ? await runFixtures({ resolver, skillName }).then((r) => ({ ok: r.ok, failed: r.failed }))
       : undefined;
-    send(res, 200, {
+    sendOk(res, {
       before,
       after: result.optimized,
       validationSummary,
-      tokens: result.usage,
+      usage: result.usage,
     });
-  } catch (e) {
-    sendError(res, 500, e instanceof Error ? e.message : String(e), "OPTIMIZE_ERROR");
+  } catch (e: unknown) {
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === "QUEUE_FULL" && err.status === 503) {
+      sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL");
+      return;
+    }
+    sendError(res, 500, e instanceof Error ? (e as Error).message : String(e), "MISSING_OPTIONAL_DEP");
   }
 }
 
@@ -290,37 +355,46 @@ async function handleOptimizeBatch(
     const all = await getSkillNamesAsync(resolver);
     skills = all.filter((n) => n !== "ai.ask");
   }
+  const { id, job } = createJob("batch", { totalSkills: skills.length });
+  updateJob(id, { status: "running" });
+  sendOk(res, { jobId: id, status: "running", totalSkills: skills.length });
+
   const mode = b?.mode === "weak" ? "weak" : "normal";
   const continueOnError = b?.continueOnError === true;
   const results: Array<{ skillName: string; ok: boolean; error?: string }> = [];
-  for (const skillName of skills) {
+  (async () => {
     try {
-      const before = await getSkillInstructions(resolver, skillName);
-      if (!before?.trim()) {
-        results.push({ skillName, ok: false, error: "No instructions" });
-        if (!continueOnError) break;
-        continue;
+      for (let i = 0; i < skills.length; i++) {
+        const skillName = skills[i]!;
+        updateJob(id, { progress: (i + 1) / skills.length, currentStep: `Optimizing ${skillName}` });
+        try {
+          const before = await getSkillInstructions(resolver, skillName);
+          if (!before?.trim()) {
+            results.push({ skillName, ok: false, error: "No instructions" });
+            if (!continueOnError) break;
+            continue;
+          }
+          const result = await optimizeInstruction(before, mode, skillName);
+          await setSkillInstructions(resolver, skillName, result.optimized);
+          results.push({ skillName, ok: true });
+        } catch (e) {
+          results.push({
+            skillName,
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+          if (!continueOnError) break;
+        }
       }
-      const result = await optimizeInstruction(before, mode, skillName);
-      await setSkillInstructions(resolver, skillName, result.optimized);
-      results.push({ skillName, ok: true });
+      updateJob(id, { status: "completed", progress: 1, result: { results } });
     } catch (e) {
-      results.push({
-        skillName,
-        ok: false,
+      updateJob(id, {
+        status: "failed",
         error: e instanceof Error ? e.message : String(e),
+        errorCode: "OPTIMIZE_ERROR",
       });
-      if (!continueOnError) break;
     }
-  }
-  send(res, 200, {
-    results,
-    summary: {
-      total: skills.length,
-      ok: results.filter((r) => r.ok).length,
-      failed: results.filter((r) => !r.ok).length,
-    },
-  });
+  })();
 }
 
 async function handleRaceModels(
@@ -328,61 +402,95 @@ async function handleRaceModels(
   body: unknown
 ): Promise<void> {
   if (body == null || typeof body !== "object") {
-    sendError(res, 400, "Body must be RaceModelsRequest object", "BAD_REQUEST");
+    sendError(res, 400, "Body must be RaceModelsRequest object", "INVALID_INPUT");
     return;
   }
-  try {
-    const result = await concurrencyGuard(() => raceModels(body as Parameters<typeof raceModels>[0]));
-    send(res, 200, result);
-  } catch (e) {
-    sendError(res, 500, e instanceof Error ? e.message : String(e), "RACE_ERROR");
-  }
+  const req = body as { testCases?: unknown[]; candidates?: unknown[] };
+  const totalRuns = (req.testCases?.length ?? 1) * (req.candidates?.length ?? 1);
+  const { id } = createJob("race", { totalRuns });
+  updateJob(id, { status: "running" });
+  sendOk(res, { jobId: id, status: "running", totalRuns });
+
+  (async () => {
+    try {
+      const result = await concurrencyGuard(() => raceModels(body as Parameters<typeof raceModels>[0]));
+      updateJob(id, { status: "completed", progress: 1, result });
+    } catch (e) {
+      updateJob(id, {
+        status: "failed",
+        error: e instanceof Error ? e.message : String(e),
+        errorCode: "OPENROUTER_HTTP_ERROR",
+      });
+    }
+  })();
 }
 
 async function handleContentSync(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
   const b = (body as { dryRun?: boolean; optimize?: boolean }) ?? {};
-  const { id, job } = createJob();
-  updateJob(id, { status: "running" });
-  const args = ["run", "content:sync:no-test", "--", "--no-push"];
-  if (b.dryRun) args.push("--dry-run");
-  if (b.optimize) args.push("--optimize");
-  const child = spawn("npm", args, {
-    cwd: rootDir,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env },
-  });
-  child.stdout?.on("data", (chunk) => appendJobLog(id, chunk.toString()));
-  child.stderr?.on("data", (chunk) => appendJobLog(id, chunk.toString()));
-  child.on("close", (code) => {
-    updateJob(id, {
-      status: code === 0 ? "completed" : "failed",
-      result: code === 0 ? { ok: true } : undefined,
-      error: code !== 0 ? `Exit code ${code}` : undefined,
+  if (b.optimize) {
+    const { id } = createJob("content-sync");
+    updateJob(id, { status: "running" });
+    const args = ["run", "content:sync:no-test", "--", "--no-push", "--optimize"];
+    if (b.dryRun) args.push("--dry-run");
+    const child = spawn("npm", args, {
+      cwd: rootDir,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env },
     });
-  });
-  send(res, 200, { ok: true, jobId: id });
+    child.stdout?.on("data", (chunk) => appendJobLog(id, chunk.toString()));
+    child.stderr?.on("data", (chunk) => appendJobLog(id, chunk.toString()));
+    child.on("close", (code) => {
+      updateJob(id, {
+        status: code === 0 ? "completed" : "failed",
+        result: code === 0 ? { ok: true } : undefined,
+        error: code !== 0 ? `Exit code ${code}` : undefined,
+        errorCode: code !== 0 ? "MISSING_OPTIONAL_DEP" : undefined,
+      });
+    });
+    sendOk(res, { jobId: id, status: "running" });
+    return;
+  }
+  try {
+    const resolver = getSkillsResolver();
+    const report = await updateLibraryIndex({
+      resolver,
+      prefix: "skills/",
+      dryRun: b.dryRun ?? false,
+    });
+    const st = report.stats;
+    sendOk(res, {
+      synced: (st?.skillsUpdated ?? 0) + (st?.skillsUnchanged ?? 0),
+      created: 0,
+      updated: st?.skillsUpdated ?? 0,
+      unchanged: st?.skillsUnchanged ?? 0,
+      errors: report.errors?.map((e: { reason?: string }) => e.reason ?? String(e)) ?? [],
+    });
+  } catch (e) {
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
+  }
 }
 
 async function handleContentIndex(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
   const b = (body as { root?: string; prefix?: string }) ?? {};
-  const { id, job } = createJob();
-  updateJob(id, { status: "running" });
   const resolver = getSkillsResolver();
-  updateLibraryIndex({
-    resolver,
-    prefix: b.prefix ?? "skills/",
-    dryRun: false,
-  })
-    .then((report) => {
-      updateJob(id, { status: "completed", result: { ok: true, summary: report } });
-    })
-    .catch((e) => {
-      updateJob(id, {
-        status: "failed",
-        error: e instanceof Error ? e.message : String(e),
-      });
+  try {
+    const report = await updateLibraryIndex({
+      resolver,
+      prefix: b.prefix ?? "skills/",
+      dryRun: false,
     });
-  send(res, 200, { ok: true, jobId: id });
+    const skills: string[] = (report.refKeys ?? []).map((key: string) => {
+      const m = key.match(/[^/]+\.json$/);
+      return m ? m[0].replace(".json", "") : key;
+    });
+    sendOk(res, {
+      indexed: report.stats?.skillsTotal ?? 0,
+      skills,
+      errors: report.errors?.map((e: { reason?: string }) => e.reason ?? String(e)) ?? [],
+    });
+  } catch (e) {
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
+  }
 }
 
 async function handleContentFixtures(
@@ -396,13 +504,37 @@ async function handleContentFixtures(
       resolver,
       skillName: b.skillName,
     });
-    send(res, 200, {
-      ok: report.ok,
-      summary: { passed: report.passed, failed: report.failed, results: report.results },
-      errors: report.results.filter((r) => !r.valid).map((r) => ({ ...r })),
+    const bySkill = new Map<string, { status: "passed" | "failed"; errors: string[] }>();
+    for (const r of report.results) {
+      const key = r.skillId;
+      const existing = bySkill.get(key);
+      const hasError = !r.valid;
+      const errs = (r.errors ?? []) as string[];
+      if (existing) {
+        if (hasError) {
+          existing.status = "failed";
+          existing.errors.push(...errs);
+        }
+      } else {
+        bySkill.set(key, {
+          status: hasError ? "failed" : "passed",
+          errors: hasError ? [...errs] : [],
+        });
+      }
+    }
+    const results = Array.from(bySkill.entries()).map(([skill, v]) =>
+      v.errors.length ? { skill, status: "failed" as const, errors: v.errors } : { skill, status: v.status }
+    );
+    const total = report.passed + report.failed;
+    sendOk(res, {
+      total,
+      passed: report.passed,
+      failed: report.failed,
+      skipped: 0,
+      results,
     });
   } catch (e) {
-    sendError(res, 500, e instanceof Error ? e.message : String(e), "FIXTURES_ERROR");
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
   }
 }
 
@@ -413,10 +545,26 @@ async function handleContentLayoutLint(
   const resolver = getSkillsResolver();
   try {
     const report = await runLayoutLint(resolver);
-    send(res, 200, { ok: report.ok, errors: report.errors });
+    const issues = report.errors.map((issue) => ({
+      path: "skills/",
+      issue,
+      severity: "error" as const,
+    }));
+    sendOk(res, { valid: report.ok, issues });
   } catch (e) {
-    sendError(res, 500, e instanceof Error ? e.message : String(e), "LAYOUT_LINT_ERROR");
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
   }
+}
+
+function parseQuery(url: string): Record<string, string> {
+  const q = url?.split("?")[1];
+  if (!q) return {};
+  const out: Record<string, string> = {};
+  for (const part of q.split("&")) {
+    const [k, v] = part.split("=").map((s) => decodeURIComponent(s.replace(/\+/g, " ")));
+    if (k) out[k] = v ?? "";
+  }
+  return out;
 }
 
 async function handler(
@@ -424,22 +572,35 @@ async function handler(
   res: import("node:http").ServerResponse
 ): Promise<void> {
   const method = req.method ?? "GET";
-  const pathStr = req.url?.split("?")[0] ?? "/";
+  const url = req.url ?? "/";
+  const pathStr = url.split("?")[0];
+  const query = parseQuery(url);
   const { segments, name, id } = parsePath(pathStr);
 
   if (method === "OPTIONS") {
-    res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, x-api-key",
-    });
+    res.writeHead(204, CORS_HEADERS);
     res.end();
     return;
   }
 
   if (pathStr === "/health" && method === "GET") {
-    res.writeHead(200, { "Content-Type": "application/json", ...CORS });
-    res.end(JSON.stringify({ ok: true }));
+    const resolver = getSkillsResolver();
+    const names = await getSkillNamesAsync(resolver).catch(() => []);
+    const hasOpenrouterKey = Boolean(process.env.OPENROUTER_API_KEY?.trim());
+    const backends: string[] = ["openrouter"];
+    try {
+      await import("./backends/llamaCpp.js");
+      backends.push("llama-cpp");
+    } catch {
+      // optional
+    }
+    sendOk(res, {
+      version: "2.1.0",
+      uptime: Math.floor((Date.now() - serverStartedAt) / 1000),
+      skills: names.length,
+      hasOpenrouterKey,
+      backends: [...new Set(backends)],
+    });
     return;
   }
 
@@ -450,23 +611,24 @@ async function handler(
   }
 
   if (pathStr === "/" || pathStr === "") {
-    send(res, 200, {
-      name: "light-skills",
+    sendOk(res, {
+      name: "aifunctions",
       version: "2.1.0",
       endpoints: {
         "GET /health": "Health check",
         "GET /skills": "List skills with metadata",
         "GET /skills/:name": "Skill details",
-        "POST /skills/:name/run": "Run skill (body: { request })",
-        "POST /run": "Run skill (body: { skill, request })",
+        "POST /skills/:name/run": "Run skill (body: { input, options })",
+        "POST /run": "Run skill (body: { skill, request, options })",
         "POST /optimize/instructions": "Optimize raw or skill instructions",
         "POST /optimize/skill": "Optimize one skill",
         "POST /optimize/batch": "Optimize multiple skills",
         "POST /race/models": "Race models (RaceModelsRequest)",
-        "POST /content/sync": "Content sync (returns jobId)",
-        "POST /content/index": "Build library index (returns jobId)",
+        "POST /content/sync": "Content sync (returns job or data)",
+        "POST /content/index": "Build library index",
         "POST /content/fixtures": "Run fixtures",
         "POST /content/layout-lint": "Layout lint",
+        "GET /jobs": "List jobs",
         "GET /jobs/:id": "Job status",
         "GET /jobs/:id/logs": "Job logs",
       },
@@ -485,7 +647,7 @@ async function handler(
       return;
     }
     if (pathStr === "/skills" && method === "GET") {
-      await handleSkillsList(res);
+      await handleSkillsList(res, query);
       return;
     }
   }
@@ -495,7 +657,7 @@ async function handler(
       const body = await readJsonBody(req);
       await handleRun(res, body);
     } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "BAD_REQUEST");
+      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
     }
     return;
   }
@@ -505,7 +667,7 @@ async function handler(
       const body = await readJsonBody(req);
       await handleOptimizeInstructions(res, body);
     } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "BAD_REQUEST");
+      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
     }
     return;
   }
@@ -515,7 +677,7 @@ async function handler(
       const body = await readJsonBody(req);
       await handleOptimizeSkill(res, body);
     } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "BAD_REQUEST");
+      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
     }
     return;
   }
@@ -525,7 +687,7 @@ async function handler(
       const body = await readJsonBody(req);
       await handleOptimizeBatch(res, body);
     } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "BAD_REQUEST");
+      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
     }
     return;
   }
@@ -535,7 +697,7 @@ async function handler(
       const body = await readJsonBody(req);
       await handleRaceModels(res, body);
     } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "BAD_REQUEST");
+      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
     }
     return;
   }
@@ -545,7 +707,7 @@ async function handler(
       const body = await readJsonBody(req);
       await handleContentSync(res, body);
     } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "BAD_REQUEST");
+      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
     }
     return;
   }
@@ -555,7 +717,7 @@ async function handler(
       const body = await readJsonBody(req);
       await handleContentIndex(res, body);
     } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "BAD_REQUEST");
+      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
     }
     return;
   }
@@ -565,7 +727,7 @@ async function handler(
       const body = await readJsonBody(req);
       await handleContentFixtures(res, body);
     } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "BAD_REQUEST");
+      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
     }
     return;
   }
@@ -575,40 +737,71 @@ async function handler(
       const body = await readJsonBody(req);
       await handleContentLayoutLint(res, body);
     } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "BAD_REQUEST");
+      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
     }
     return;
   }
 
-  if (segments[0] === "jobs" && segments.length === 2) {
-    const jobId = segments[1]!;
-    if (method === "GET" && !pathStr.endsWith("/logs")) {
-      const job = getJob(jobId);
-      if (!job) {
-        sendError(res, 404, "Job not found or expired", "NOT_FOUND");
-        return;
-      }
-      send(res, 200, {
-        status: job.status,
-        progress: job.progress,
-        result: job.result,
-        error: job.error,
-      });
+  if (segments[0] === "jobs") {
+    if (pathStr === "/jobs" && method === "GET") {
+      const status = query.status as "running" | "completed" | "failed" | undefined;
+      const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
+      const offset = Math.max(0, Number(query.offset) || 0);
+      const { jobs, total } = listJobs({ status, limit, offset });
+      const list = jobs.map((j) => ({
+        id: j.id,
+        type: j.type ?? "unknown",
+        status: j.status,
+        progress: j.progress ?? 0,
+        createdAt: new Date(j.createdAt).toISOString(),
+        updatedAt: new Date(j.updatedAt).toISOString(),
+      }));
+      sendOk(res, { jobs: list, total });
       return;
     }
-    if (method === "GET" && pathStr === `/jobs/${jobId}/logs`) {
-      const logs = getJobLogs(jobId);
-      if (logs === null) {
-        sendError(res, 404, "Job not found or expired", "NOT_FOUND");
+    if (segments.length === 2) {
+      const jobId = segments[1]!;
+      if (method === "GET" && !pathStr.endsWith("/logs")) {
+        const job = getJob(jobId);
+        if (!job) {
+          sendError(res, 404, "Job not found or expired", "JOB_NOT_FOUND");
+          return;
+        }
+        const data: Record<string, unknown> = {
+          id: job.id,
+          type: job.type ?? "unknown",
+          status: job.status,
+          progress: job.progress ?? 0,
+          createdAt: new Date(job.createdAt).toISOString(),
+          updatedAt: new Date(job.updatedAt).toISOString(),
+          result: job.result ?? null,
+        };
+        if (job.status === "completed") data.completedAt = new Date(job.updatedAt).toISOString();
+        if (job.status === "failed") {
+          data.failedAt = new Date(job.updatedAt).toISOString();
+          data.error = { code: job.errorCode ?? "JOB_FAILED", message: job.error ?? "Job failed" };
+        }
+        sendOk(res, data);
         return;
       }
-      res.writeHead(200, { "Content-Type": "text/plain", ...CORS });
-      res.end(logs.join(""));
-      return;
+      if (method === "GET" && pathStr === `/jobs/${jobId}/logs`) {
+        const logs = getJobLogs(jobId);
+        if (logs === null) {
+          sendError(res, 404, "Job not found or expired", "JOB_NOT_FOUND");
+          return;
+        }
+        const logEntries = logs.map((line) => ({
+          ts: new Date().toISOString(),
+          level: "info",
+          message: line.trim(),
+        }));
+        sendOk(res, { logs: logEntries });
+        return;
+      }
     }
   }
 
-  send(res, 404, { error: "Not found", path: pathStr });
+  sendError(res, 404, "Not found", "NOT_FOUND");
 }
 
 const server = createServer((req, res) => {
@@ -618,7 +811,7 @@ const server = createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`light-skills REST API listening on http://localhost:${PORT}`);
+  console.log(`aifunctions REST API listening on http://localhost:${PORT}`);
   console.log("  GET  /         - endpoint list");
   console.log("  GET  /health   - health check");
   console.log("  GET  /skills   - list skills");

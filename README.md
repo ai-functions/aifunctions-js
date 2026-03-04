@@ -1,16 +1,16 @@
-# light-skills
+# aifunctions
 
 **Prebuilt AI functions + a stable LLM client for Node.js.**
 
-Instead of wiring LLM calls by hand, light-skills gives you production-ready functions with typed I/O, guaranteed JSON output, and a retry/validation layer:
+Instead of wiring LLM calls by hand, aifunctions gives you production-ready functions with typed I/O, guaranteed JSON output, and a retry/validation layer:
 
-Why light-skills?
+Why aifunctions?
 
 You need an LLM to do something — classify a ticket, map fields between two schemas, extract structured data from messy text. You get it working in 10 minutes. Then you spend two days getting it working correctly: tuning the prompt, handling malformed output, picking the right model, adding retries, validating the response shape.
 
 And when you're done, that function lives buried in one project. Next month you need something similar and you start from scratch, or copy-paste and drift.
 
-light-skills solves this by giving you a framework for building LLM-backed functions the right way, once, and keeping them in a shared library that improves over time.
+aifunctions solves this by giving you a framework for building LLM-backed functions the right way, once, and keeping them in a shared library that improves over time.
 
 What "the right way" means here:
 
@@ -30,7 +30,7 @@ The loop looks like: rough idea → generate instructions → generate rules fro
 
 Example: adding a new function
 
-Say your team keeps writing one-off prompts to extract line items from invoices. With light-skills, you define it once:
+Say your team keeps writing one-off prompts to extract line items from invoices. With aifunctions, you define it once:
 
 skills/extract-invoice-lines/weak    ← instructions for local/cheap model
 skills/extract-invoice-lines/strong  ← instructions for cloud model
@@ -50,7 +50,7 @@ The prebuilt functions (classify, summarize, matchLists, judge, etc.) are just f
 
 
 ```ts
-import { classify, summarize, matchLists, judge, generateInstructions } from "light-skills/functions";
+import { classify, summarize, matchLists, judge, generateInstructions } from "aifunctions/functions";
 
 // Classify text
 const { categories } = await classify({ text: "Can't login to my account", categories: ["Billing", "Auth", "Support"] });
@@ -105,19 +105,19 @@ Instruction files live at `skills/<skillId>/weak`, `strong`, `ultra` in your con
 ### Base (OpenRouter)
 
 ```bash
-npm i light-skills
+npm i aifunctions
 ```
 
 ### + Local CPU (GGUF via llama.cpp)
 
 ```bash
-npm i light-skills node-llama-cpp
+npm i aifunctions node-llama-cpp
 ```
 
 ### + Transformers.js
 
 ```bash
-npm i light-skills @huggingface/transformers
+npm i aifunctions @huggingface/transformers
 ```
 
 ---
@@ -127,7 +127,7 @@ npm i light-skills @huggingface/transformers
 ### Text functions
 
 ```ts
-import { classify, summarize, extractEntities, matchLists, rank } from "light-skills/functions";
+import { classify, summarize, extractEntities, matchLists, rank } from "aifunctions/functions";
 
 // Classify (e.g. support ticket routing)
 const { categories } = await classify({
@@ -152,7 +152,7 @@ const { rankedItems } = await rank({ items: products, query: "Affordable noise-c
 ### Generic JSON completion
 
 ```ts
-import { ask, runJsonCompletion, extractFirstJsonObject } from "light-skills/functions";
+import { ask, runJsonCompletion, extractFirstJsonObject } from "aifunctions/functions";
 
 // Generic instruction → JSON
 const data = await ask({
@@ -174,7 +174,7 @@ const json = extractFirstJsonObject(modelOutput);
 ### Evaluation pipeline
 
 ```ts
-import { judge, aggregateJudgeFeedback, compare } from "light-skills/functions";
+import { judge, aggregateJudgeFeedback, compare } from "aifunctions/functions";
 
 // Score a response against rules
 const verdict = await judge({
@@ -202,7 +202,7 @@ const comparison = await compare({
 ### Optimization & benchmarking
 
 ```ts
-import { optimizeInstructions, generateInstructions, raceModels } from "light-skills/functions";
+import { optimizeInstructions, generateInstructions, raceModels } from "aifunctions/functions";
 
 // One-shot: improve an instruction set for clarity/enforceability
 const { optimizedInstructions, judgeRules } = await optimizeInstructions({
@@ -255,7 +255,7 @@ OPENROUTER_API_KEY=sk-or-...
 Pass `mode` to any function. Omit it for the default (`"normal"`). Override the model or backend by passing a custom `client`:
 
 ```ts
-import { createClient } from "light-skills";
+import { createClient } from "aifunctions";
 const ai = createClient({ backend: "llama-cpp" });
 await classify({ text: "...", categories: [...], client: ai, mode: "weak" });
 ```
@@ -309,7 +309,7 @@ const { clusters } = await cluster({ items: userFeedbackList, numClusters: 4 });
 Map fields between two collection schemas (e.g. two database schemas or API shapes).
 
 ```ts
-import { collectionMapping } from "light-skills/functions";
+import { collectionMapping } from "aifunctions/functions";
 
 const mapping = await collectionMapping({
   left: { name: "orders", fields: ["_id", "userId", "total", "createdAt"] },
@@ -323,7 +323,7 @@ const mapping = await collectionMapping({
 ## JSON helpers
 
 ```ts
-import { extractFirstJson, extractFirstJsonObject, parseJsonResponse, askJson } from "light-skills/functions";
+import { extractFirstJson, extractFirstJsonObject, parseJsonResponse, askJson } from "aifunctions/functions";
 
 // Returns { ok: true, data } or { ok: false, errorCode, message }
 const r = extractFirstJson('Some text {"a": 1} more');
@@ -359,7 +359,7 @@ All JSON execution paths (`runJsonCompletion`, `askJson`) use a hardened pipelin
 When you want to verify that a skill's output matches its declared contract:
 
 ```ts
-import { run, validateOutput, validateAgainstSchema } from "light-skills/functions";
+import { run, validateOutput, validateAgainstSchema } from "aifunctions/functions";
 
 // run() with validateOutput: true → always returns { result, validation }
 const { result, validation } = await run("classify", { text: "...", categories: [...] }, {
@@ -381,14 +381,14 @@ In the REST server set `VALIDATE_SKILL_OUTPUT=1`; every `POST /run` response bec
 Run any function by string name — useful for generic pipelines or the REST API:
 
 ```ts
-import { run, getSkillNames, runWithContent, runSkill } from "light-skills/functions";
+import { run, getSkillNames, runWithContent, runSkill } from "aifunctions/functions";
 
 // built-in functions
 await run("classify", { text: "...", categories: [...] });
 getSkillNames(); // ["matchLists", "extractTopics", "classify", "judge", ...]
 
 // content-resolved (instructions from git/local content store)
-import { getSkillsResolver } from "light-skills";
+import { getSkillsResolver } from "aifunctions";
 const resolver = getSkillsResolver();
 await runWithContent("myCustomSkill", { inputData: "..." }, { resolver });
 
@@ -449,7 +449,7 @@ npm run build && npm run serve
 
 ### Auth and limits
 
-- **Optional API key:** Set `LIGHT_SKILLS_API_KEY`; then send `x-api-key: <key>` on every request. If unset, no auth.
+- **Optional API key:** Set `AIFUNCTIONS_API_KEY`; then send `x-api-key: <key>` on every request. If unset, no auth.
 - **Concurrency:** `MAX_CONCURRENCY` (default 50) caps concurrent run/optimize/race. `JOB_TTL` (default 24h ms) for job retention.
 
 ```bash
@@ -465,7 +465,7 @@ CORS enabled (`*`). Set `VALIDATE_SKILL_OUTPUT=1` to get `{ result, validation }
 ## Low-level client
 
 ```ts
-import { createClient } from "light-skills";
+import { createClient } from "aifunctions";
 
 const ai = createClient({ backend: "openrouter" });
 
@@ -547,7 +547,7 @@ To ship the library with all skills optimized and validated:
 5. **Validate:** `npm run content:fixtures` (validates index examples vs `io.output`), then `npm run content:layout-lint` (enforces folder-based keys only). If layout-lint fails (root-level `*-instructions.md` / `*-rules.json`), run `content:sync` once to populate folder-based keys, then remove the old root-level files in `.content` so layout-lint passes.
 
 ```ts
-import { getSkillsResolver, resolveSkillInstructions, pushSkillsContent } from "light-skills";
+import { getSkillsResolver, resolveSkillInstructions, pushSkillsContent } from "aifunctions";
 
 const resolver = getSkillsResolver();
 const system = await resolveSkillInstructions(resolver, "judge", "strong");
@@ -582,7 +582,7 @@ npm run test:unit                  # unit tests only — no API key, ~2 s
 OpenRouter recommends it; `max_tokens` is deprecated.
 
 **Will token counts match across backends?**
-No. Tokenization is model-specific. `light-skills` normalizes the *shape* (`prompt_tokens`, `completion_tokens`, `total_tokens`); numbers are backend-specific.
+No. Tokenization is model-specific. `aifunctions` normalizes the *shape* (`prompt_tokens`, `completion_tokens`, `total_tokens`); numbers are backend-specific.
 
 **Where is the full reference?**
 - [docs/CORE.md](docs/CORE.md) — core offering + capability checklist

@@ -1,5 +1,5 @@
 {
-  "name": "light-skills",
+  "name": "aifunctions",
   "version": "2.1.0",
   "description": "Minimal ask() API for remote (OpenRouter) and local (llama.cpp / Transformers.js) LLMs",
   "type": "module",
