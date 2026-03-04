@@ -1,566 +1,592 @@
 # light-skills
 
-One tiny API for **remote LLMs (OpenRouter)** and **local CPU LLMs (GGUF via llama.cpp)**:
+**Prebuilt AI functions + a stable LLM client for Node.js.**
 
-* `ask("instruction") -> { text, usage }`
-* **Library Functions**: `callAI`, `matchLists`, `extractTopics`, and more (via `/functions`)
-* Returns tokens consistently (`prompt_tokens`, `completion_tokens`, `total_tokens`)
-* OpenRouter provider routing via `vendor` preference
-* Optional local backends (install only what you need)
+Instead of wiring LLM calls by hand, light-skills gives you production-ready functions with typed I/O, guaranteed JSON output, and a retry/validation layer:
 
-OpenRouter uses an OpenAI-compatible Chat Completions endpoint and returns a usage object that can include token counts and cost details.
+Why light-skills?
+
+You need an LLM to do something — classify a ticket, map fields between two schemas, extract structured data from messy text. You get it working in 10 minutes. Then you spend two days getting it working correctly: tuning the prompt, handling malformed output, picking the right model, adding retries, validating the response shape.
+
+And when you're done, that function lives buried in one project. Next month you need something similar and you start from scratch, or copy-paste and drift.
+
+light-skills solves this by giving you a framework for building LLM-backed functions the right way, once, and keeping them in a shared library that improves over time.
+
+What "the right way" means here:
+
+Every function you create gets typed input/output contracts, a JSON safety layer with retries, tiered instruction sets (cheap local model for dev, strong cloud model for prod), and output validation against a declared schema. You write the intent, the system handles the engineering.
+
+You don't even have to write good instructions
+
+This is the part that saves the most time. You can start with rough instructions — or no instructions at all — and the system does the rest:
+
+generateInstructions — give it a description and test cases, it writes the instructions for you, runs them, judges the output, rewrites, and loops until they pass your threshold.
+optimizeInstructions — already have instructions that mostly work? Feed in examples of good and bad output, and it rewrites them to be clearer and more enforceable.
+generateJudgeRules — give it examples of good and bad output, it generates scoring rules automatically. No need to hand-write what "correct" means.
+judge — scores any output against rules with weighted evidence, so you always know if a function is performing.
+raceModels — run your test cases across multiple models and find out which one actually performs best for your function, not based on generic benchmarks.
+
+The loop looks like: rough idea → generate instructions → generate rules from examples → run against test cases → judge → fix → repeat until it passes. You can do this manually or let generateInstructions run the whole cycle.
+
+Example: adding a new function
+
+Say your team keeps writing one-off prompts to extract line items from invoices. With light-skills, you define it once:
+
+skills/extract-invoice-lines/weak    ← instructions for local/cheap model
+skills/extract-invoice-lines/strong  ← instructions for cloud model
+
+Then you call it like any library function:
+
+const { lines } = await run("extract-invoice-lines", { text: invoiceText });
+// [{ description: "Consulting — March", amount: 4500, currency: "USD" }, ...]
+
+Share or keep private — your choice
+
+Skills are stored in a git-backed content repo. Point it at a shared repo and your functions become available to your whole team or the community — someone builds a great extract-invoice-lines, everyone benefits. If you'd rather keep things private, just configure it to your own repo and you have a personal library of production-grade LLM functions that follows you across projects.
+
+The prebuilt functions (classify, summarize, matchLists, judge, etc.) are just functions that were built this way. The real value is that you can keep adding your own, and the system ensures each one is production-grade and reusable.
+
+
+
+
+```ts
+import { classify, summarize, matchLists, judge, generateInstructions } from "light-skills/functions";
+
+// Classify text
+const { categories } = await classify({ text: "Can't login to my account", categories: ["Billing", "Auth", "Support"] });
+
+// Judge an LLM response against rules
+const verdict = await judge({ instructions: "...", response: "...", rules: [...], threshold: 0.8 });
+
+// Auto-improve instructions until they pass your test suite
+const result = await generateInstructions({ seedInstructions: "...", testCases: [...], judgeThreshold: 0.85, ... });
+```
+
+No prompt engineering on your side. Each function has typed inputs/outputs and file-based instruction packs (weak / strong / ultra) you can tune per project.
+
+---
+
+## What you get
+
+### 1. Prebuilt AI functions
+
+Call them like any other library function — typed, JSON-only, no boilerplate:
+
+| Category | Functions |
+|----------|-----------|
+| **Text** | `classify`, `summarize`, `extractTopics`, `extractEntities`, `sentiment`, `translate` |
+| **Lists** | `matchLists`, `rank`, `cluster` |
+| **Generic** | `ask`, `askJson`, `runJsonCompletion` |
+| **Evaluation** | `judge`, `compare` |
+| **Optimization** | `optimizeInstructions`, `generateInstructions`, `fixInstructions`, `generateRule`, `generateJudgeRules` |
+| **Aggregation** | `aggregateJudgeFeedback`, `normalizeJudgeRules` |
+| **Model benchmarking** | `raceModels` |
+| **Records** | `collectionMapping` |
+
+### 2. A tiny, stable AI client
+
+`createClient()` → `ask()` — connects to OpenRouter (remote) or llama.cpp / Transformers.js (local CPU). One consistent API regardless of backend; token usage normalized across all providers.
+
+### 3. JSON safety layer
+
+- `extractFirstJsonObject(text)` — extract the first `{...}` from any model output (prefers ` ```json ` blocks, then first brace-balanced `{}`); throws if none found.
+- `extractFirstJson(text)` — same but returns `{ ok, data }` / `{ ok: false, errorCode }` without throwing.
+- `parseJsonResponse(text, opts)` — deterministic extract with optional LLM fallback.
+- `runJsonCompletion({ instruction, options })` — run a completion and get parsed JSON back directly; retries once with a stricter system message if parsing fails.
+
+### 4. Skill packs (file-based instructions)
+
+Instruction files live at `skills/<skillId>/weak`, `strong`, `ultra` in your content repo. You can tune them without touching code; CI runs `content:fixtures` to verify they still satisfy contracts.
 
 ---
 
 ## Install
 
-### Base (OpenRouter only)
+### Base (OpenRouter)
 
 ```bash
 npm i light-skills
 ```
 
-### Local CPU (GGUF) support
+### + Local CPU (GGUF via llama.cpp)
 
 ```bash
 npm i light-skills node-llama-cpp
 ```
 
-`node-llama-cpp` provides Node.js bindings for `llama.cpp` to run GGUF models locally.
-
-### Optional: Transformers.js backend
+### + Transformers.js
 
 ```bash
 npm i light-skills @huggingface/transformers
 ```
 
-Transformers.js supports text generation tasks in JS/Node environments.
+---
+
+## Quick starts
+
+### Text functions
+
+```ts
+import { classify, summarize, extractEntities, matchLists, rank } from "light-skills/functions";
+
+// Classify (e.g. support ticket routing)
+const { categories } = await classify({
+  text: "I was charged twice this month.",
+  categories: ["Billing", "Technical Support", "General Inquiry"],
+});
+
+// Summarize
+const { summary, keyPoints } = await summarize({ text: "...", length: "brief" });
+
+// Extract entities
+const { entities } = await extractEntities({ text: "Apple was founded by Steve Jobs in Cupertino." });
+// [{ name: "Apple", type: "Organization" }, ...]
+
+// Match two lists semantically
+const result = await matchLists({ list1: sourceFields, list2: targetFields, guidance: "Match by semantic meaning." });
+
+// Rank items by query
+const { rankedItems } = await rank({ items: products, query: "Affordable noise-cancelling headphones" });
+```
+
+### Generic JSON completion
+
+```ts
+import { ask, runJsonCompletion, extractFirstJsonObject } from "light-skills/functions";
+
+// Generic instruction → JSON
+const data = await ask({
+  instruction: "Extract the main topic and two sub-topics.",
+  outputContract: "Single JSON: { main: string, subTopics: string[] }",
+  inputData: { text: "..." },
+});
+
+// run a raw completion and get parsed JSON back (with 1 auto-retry on parse fail)
+const { parsed, text, usage } = await runJsonCompletion({
+  instruction: "Map these two collections. Return JSON only.",
+  options: { model: "openai/gpt-4o", maxTokens: 1000 },
+});
+
+// extract JSON from any string (throws if none found)
+const json = extractFirstJsonObject(modelOutput);
+```
+
+### Evaluation pipeline
+
+```ts
+import { judge, aggregateJudgeFeedback, compare } from "light-skills/functions";
+
+// Score a response against rules
+const verdict = await judge({
+  instructions: systemPrompt,
+  response: modelOutput,
+  rules: [
+    { rule: "Must output valid JSON only", weight: 3 },
+    { rule: "Field names must match the schema exactly", weight: 2 },
+  ],
+  threshold: 0.8,
+  mode: "strong",
+});
+// verdict.pass, verdict.scoreNormalized, verdict.ruleResults[].evidences
+
+// Compare two instruction sets with an automatic judge
+const comparison = await compare({
+  instructionsA: draft1,
+  instructionsB: draft2,
+  testCases: [{ id: "t1", inputMd: "..." }],
+  rules: [...],
+  threshold: 0.8,
+});
+```
+
+### Optimization & benchmarking
+
+```ts
+import { optimizeInstructions, generateInstructions, raceModels } from "light-skills/functions";
+
+// One-shot: improve an instruction set for clarity/enforceability
+const { optimizedInstructions, judgeRules } = await optimizeInstructions({
+  seedInstructions: myPrompt,
+  examples: [{ id: "ex1", inputMd: "...", outputs: [{ id: "o1", text: "...", label: "good" }] }],
+});
+
+// Iterative loop: run → judge → fix until threshold or maxCycles
+const best = await generateInstructions({
+  seedInstructions: myPrompt,
+  testCases: [{ id: "t1", inputMd: "..." }],
+  call: "askJson",
+  targetModel: { model: "openai/gpt-4o", vendor: "openai", class: "strong" },
+  judgeThreshold: 0.85,
+  targetAverageThreshold: 0.85,
+  loop: { maxCycles: 5 },
+  optimizer: { mode: "strong" },
+});
+// best.best.instructions, best.achieved, best.history
+
+// Benchmark multiple models on your test suite
+const ranking = await raceModels({
+  taskName: "collection-mapping",
+  call: "askJson",
+  skill: { strongSystem: systemPrompt },
+  testCases: [{ id: "t1", inputMd: "..." }],
+  threshold: 0.8,
+  models: [
+    { id: "gpt4o", model: "openai/gpt-4o", vendor: "openai", class: "strong" },
+    { id: "claude", model: "anthropic/claude-3-5-haiku", vendor: "anthropic", class: "strong" },
+  ],
+});
+// ranking.ranking[0].modelId — best model
+```
 
 ---
 
-## Quickstart — OpenRouter (remote)
+## Modes
 
-### 1) Add `.env`
+| Mode | Backend | When to use |
+|------|---------|-------------|
+| **weak** | local llama.cpp (no API key) | Dev, low-cost, offline |
+| **normal** / **strong** | OpenRouter `gpt-5-nano` / `gpt-5.2` | Default cloud |
+| **ultra** | same as strong | Highest-tier label |
 
 ```env
 OPENROUTER_API_KEY=sk-or-...
-# Optional attribution:
-OPENROUTER_APP_URL=https://yourapp.example
-OPENROUTER_APP_NAME=My App
 ```
 
-### 2) Use it
+Pass `mode` to any function. Omit it for the default (`"normal"`). Override the model or backend by passing a custom `client`:
+
+```ts
+import { createClient } from "light-skills";
+const ai = createClient({ backend: "llama-cpp" });
+await classify({ text: "...", categories: [...], client: ai, mode: "weak" });
+```
+
+---
+
+## Function reference
+
+### `matchLists` — Semantic list matching
+
+Matches items from two lists by semantic similarity. Pass `existingMatches` to skip already-mapped items (safe for incremental runs).
+
+```ts
+const result = await matchLists({
+  list1: source,
+  list2: target,
+  guidance: "Match by name, accepting close variants.",
+  existingMatches: previousRun.matches, // optional
+  mode: "normal",
+});
+```
+
+### `extractTopics`
+
+```ts
+const { topics } = await extractTopics({ text: "...", maxTopics: 3 });
+```
+
+### `sentiment`
+
+```ts
+const { sentiment: label, score } = await sentiment({ text: "Best product ever!" });
+```
+
+### `translate`
+
+```ts
+const { translatedText } = await translate({ text: "Hello!", targetLanguage: "French" });
+```
+
+### `cluster` — Semantic clustering
+
+```ts
+const { clusters } = await cluster({ items: userFeedbackList, numClusters: 4 });
+```
+
+> **Flexible schema:** For list operations (`matchLists`, `rank`, `cluster`), the object structure in your lists does not matter — the AI uses semantic similarity across all fields.
+
+### `collectionMapping` — Field-level collection mapping
+
+Map fields between two collection schemas (e.g. two database schemas or API shapes).
+
+```ts
+import { collectionMapping } from "light-skills/functions";
+
+const mapping = await collectionMapping({
+  left: { name: "orders", fields: ["_id", "userId", "total", "createdAt"] },
+  right: { name: "purchases", fields: ["id", "customer_id", "amount", "date"] },
+});
+// mapping.fieldMappings[].leftField, .rightField, .confidence
+```
+
+---
+
+## JSON helpers
+
+```ts
+import { extractFirstJson, extractFirstJsonObject, parseJsonResponse, askJson } from "light-skills/functions";
+
+// Returns { ok: true, data } or { ok: false, errorCode, message }
+const r = extractFirstJson('Some text {"a": 1} more');
+
+// Returns { jsonText, parsed }; throws NoJsonFoundError if no JSON (prefers ```json blocks)
+const { jsonText, parsed } = extractFirstJsonObject(modelOutput);
+
+// Deterministic extract + optional LLM fallback
+const r2 = await parseJsonResponse(mixedText, { llmFallback: true });
+
+// Single-JSON guarantee; returns AiJsonSuccess | AiJsonError (use throwOnError to throw)
+const r3 = await askJson<{ summary: string }>({
+  prompt: "Summarize in one sentence.",
+  instructions: { weak: "JSON only.", normal: "Return a single JSON object." },
+  outputContract: "Object with key 'summary' (string).",
+});
+```
+
+### JSON safety + schema validation + retries
+
+All JSON execution paths (`runJsonCompletion`, `askJson`) use a hardened pipeline:
+
+- **First-JSON extraction** — Prefer fenced ` ```json ` blocks, then the first JSON object or array (via `extract-first-json`).
+- **Secure parsing** — `safeJsonParse` (secure-json-parse) removes `__proto__` and `constructor.prototype` to prevent prototype poisoning.
+- **Optional schema validation** — Pass `schema` or `schemaKey` + `resolver` to validate with Ajv; errors are `path` + `message`.
+- **Deterministic retry** — Up to 3 attempts: normal → JSON-only guard → fix-to-schema with validation errors in the prompt. Result includes `attemptsUsed`; on failure, `AiJsonError` has `errorCode` (`ERR_NO_JSON_FOUND`, `ERR_JSON_PARSE`, `ERR_SCHEMA_INVALID`), `message`, `details`, `rawText`.
+- **Standardized shapes** — Success: `AiJsonSuccess<T>` (`ok: true`, `parsed`, `rawText`, `usage`, `model`, `attemptsUsed`, optional `validation`). Failure: `AiJsonError`. Use `throwOnError: true` to throw instead of returning an error.
+
+---
+
+## Output validation
+
+When you want to verify that a skill's output matches its declared contract:
+
+```ts
+import { run, validateOutput, validateAgainstSchema } from "light-skills/functions";
+
+// run() with validateOutput: true → always returns { result, validation }
+const { result, validation } = await run("classify", { text: "...", categories: [...] }, {
+  resolver,
+  validateOutput: true,
+}) as { result: unknown; validation: { valid: boolean; errors?: string[] } };
+
+// or validate manually
+const check = validateAgainstSchema(myOutput, mySchema);
+// check.valid, check.errors
+```
+
+In the REST server set `VALIDATE_SKILL_OUTPUT=1`; every `POST /run` response becomes `{ result, validation }`.
+
+---
+
+## Skill-by-name
+
+Run any function by string name — useful for generic pipelines or the REST API:
+
+```ts
+import { run, getSkillNames, runWithContent, runSkill } from "light-skills/functions";
+
+// built-in functions
+await run("classify", { text: "...", categories: [...] });
+getSkillNames(); // ["matchLists", "extractTopics", "classify", "judge", ...]
+
+// content-resolved (instructions from git/local content store)
+import { getSkillsResolver } from "light-skills";
+const resolver = getSkillsResolver();
+await runWithContent("myCustomSkill", { inputData: "..." }, { resolver });
+
+// raw key + INPUT_MD (advanced — custom content keys)
+const { data } = await runSkill({ key: "mySkill", mode: "strong", inputMd: "...", resolver });
+```
+
+---
+
+## REST API
+
+Expose skills, optimization, race, and content workflows over HTTP (no UI, no shell required):
+
+```bash
+npm run build && npm run serve
+# Listens on port 3780 (override: PORT=3000 npm run serve)
+```
+
+### Core
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | `{ "ok": true }` |
+| GET | `/skills` | List skills + metadata (name, version, description when index present) |
+| GET | `/skills/:name` | Skill details (from library index if available) |
+| POST | `/skills/:name/run` | Run skill; body: `{ "request": object }` |
+| POST | `/run` | Run skill; body: `{ "skill": string, "request": object }` → `{ "result": ... }` |
+
+### Optimization
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/optimize/instructions` | Optimize raw or skill instructions; body: `{ rawInstructions? \| skillName, mode?, model? }` → `{ optimizedInstructions, tokens }` |
+| POST | `/optimize/skill` | Optimize one skill; body: `{ skillName, mode?, runValidation? }` → `{ before, after, validationSummary?, tokens }` |
+| POST | `/optimize/batch` | Optimize multiple skills; body: `{ skills?: string[], mode?, continueOnError? }` → `{ results, summary }` |
+
+### Race / benchmark
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/race/models` | Race models; body: `RaceModelsRequest` → `{ ranking, details, bestModelId, ... }` |
+
+### Content workflows (CLI parity)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/content/sync` | Sync instructions to content; body: `{ dryRun?, optimize? }` → `{ ok, jobId }` |
+| POST | `/content/index` | Build library index; body: `{ root?, prefix? }` → `{ ok, jobId }` |
+| POST | `/content/fixtures` | Run fixtures; body: `{ action?, skillName?, prefix? }` → `{ ok, summary, errors? }` |
+| POST | `/content/layout-lint` | Layout lint; body: `{}` → `{ ok, errors? }` |
+
+### Jobs (long-running)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/jobs/:id` | Job status → `{ status, progress?, result?, error? }` |
+| GET | `/jobs/:id/logs` | Job logs (text/plain) |
+
+### Auth and limits
+
+- **Optional API key:** Set `LIGHT_SKILLS_API_KEY`; then send `x-api-key: <key>` on every request. If unset, no auth.
+- **Concurrency:** `MAX_CONCURRENCY` (default 50) caps concurrent run/optimize/race. `JOB_TTL` (default 24h ms) for job retention.
+
+```bash
+curl -X POST http://localhost:3780/run \
+  -H "Content-Type: application/json" \
+  -d '{"skill":"classify","request":{"text":"Billing issue","categories":["Billing","Auth"]}}'
+```
+
+CORS enabled (`*`). Set `VALIDATE_SKILL_OUTPUT=1` to get `{ result, validation }` on every `/run` response.
+
+---
+
+## Low-level client
 
 ```ts
 import { createClient } from "light-skills";
 
 const ai = createClient({ backend: "openrouter" });
 
-const res = await ai.ask("Write a 1-paragraph product tagline for a task manager.", {
+const res = await ai.ask("Write a product tagline.", {
   model: "openai/gpt-4o",
-  vendor: ["openai", "anthropic"],
+  vendor: ["openai", "anthropic"],  // provider preference order
   maxTokens: 200,
   temperature: 0.7,
 });
-
-console.log(res.text);
-console.log(res.usage);
+// res.text, res.usage.prompt_tokens, res.usage.total_tokens, res.model
 ```
 
----
-
-## Quickstart — Local CPU (GGUF via llama.cpp)
-
-### 1) Install backend
-
-```bash
-npm i node-llama-cpp
-```
-
-### 2) Download a GGUF model
-
-Get a `.gguf` file and place it e.g. at `./models/tinyllama.gguf`.
-
-### 3) Add `.env` (Optional)
-
-```env
-LLAMA_CPP_MODEL_PATH=./models/tinyllama.gguf
-LLAMA_CPP_THREADS=6
-```
-
-### 4) Use it
+### Client config
 
 ```ts
-import { createClient } from "light-skills";
+// OpenRouter
+createClient({ backend: "openrouter", openrouter: { apiKey?, baseUrl?, appUrl?, appName? } })
 
-// If variables are in .env, no need to pass llamaCpp config:
-const ai = createClient({ backend: "llama-cpp" });
+// Local GGUF (llama.cpp)
+createClient({ backend: "llama-cpp", llamaCpp: { modelPath: "./models/model.gguf", contextSize?, threads? } })
 
-// Or pass them explicitly:
-// const ai = createClient({
-//   backend: "llama-cpp",
-//   llamaCpp: { modelPath: "./models/tinyllama.gguf" }
-// });
-
-const res = await ai.ask("Explain DNS in 3 bullets.", {
-  maxTokens: 180,
-  temperature: 0.2,
-});
-
-console.log(res.text);
-console.log(res.usage);
+// Transformers.js
+createClient({ backend: "transformersjs", transformersjs: { modelId?, cacheDir?, device?: "cpu" } })
 ```
 
----
-
-## API
-
-### `createClient(config)`
-
-Creates a reusable client for a specific backend.
-
-#### OpenRouter config
-
-```ts
-createClient({
-  backend: "openrouter",
-  openrouter: {
-    apiKey?: string,
-    baseUrl?: string,
-    appUrl?: string,
-    appName?: string,
-    allowFallbacksDefault?: boolean
-  }
-})
-```
-
-#### Local llama.cpp config
-
-```ts
-createClient({
-  backend: "llama-cpp",
-  llamaCpp: {
-    modelPath: string,
-    contextSize?: number,
-    threads?: number,
-  }
-})
-```
-
-#### Transformers.js config (optional)
-
-```ts
-createClient({
-  backend: "transformersjs",
-  transformersjs?: {
-    modelId?: string,
-    cacheDir?: string,
-    device?: "cpu"
-  }
-})
-```
-
-If `TRANSFORMERS_JS_MODEL_ID` is set in `.env`, the `transformersjs` block can be omitted.
-
----
-
-### `ask(instruction, options)`
-
-```ts
-type AskOptions = {
-  maxTokens: number;
-  temperature: number;
-  model?: string;                 // OpenRouter only
-  vendor?: string | string[];     // OpenRouter provider routing
-  system?: string;                // optional system prompt
-  timeoutMs?: number;            // default 60000
-};
-```
-
-Returns:
-
-```ts
-type AskResult = {
-  text: string;
-  usage: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-    [k: string]: unknown;
-  };
-  model?: string;
-  raw?: unknown;
-};
-```
-
----
-
-## Provider routing (OpenRouter)
-
-`vendor` controls provider preference order:
-
-```ts
-vendor: "openai"
-// -> provider: { order: ["openai"], allow_fallbacks: true }
-
-vendor: ["anthropic", "openai"]
-// -> provider: { order: ["anthropic", "openai"], allow_fallbacks: true }
-```
-
----
-
-## Errors
-
-All errors throw `NxAiApiError`:
-
-* `code: "MISSING_ENV"` – missing `OPENROUTER_API_KEY`
-* `code: "OPENROUTER_HTTP_ERROR"` – non-2xx from OpenRouter
-* `code: "TIMEOUT"` – request exceeded `timeoutMs`
-* `code: "MISSING_OPTIONAL_DEP"` – selected backend requires an extra package
-
-
----
-
-## Library Functions (`light-skills/functions`)
-
-`light-skills` ships a set of utility functions for guaranteed JSON output from an LLM — importable via the `light-skills/functions` sub-path. **Full reference:** [docs/LIBRARY.md](docs/LIBRARY.md) lists every listed (built-in) function, explains unlisted (content-based) skills, and the core helpers. **I/O and templates:** [docs/FUNCTIONS_SPEC.md](docs/FUNCTIONS_SPEC.md) defines Request/Response, Modes (weak/normal/strong), and SYSTEM / USER (`INPUT_MD`) templates for all functions (including judge, compare, fix-instructions, optimize-instructions, etc.).
-
-**Library index (v1):** A structured JSON index of all skills (id, description, input/output schema, runtime) for discovery and automation. See [docs/skills-index.v1.md](docs/skills-index.v1.md). API: `getLibraryIndex({ resolver })`, `updateLibraryIndex({ resolver, dryRun?, incremental? })`, `validateLibraryIndex(index)` / `validateSkillIndexEntry(entry)`. CLI: `npm run content:index` (or `content:index:dry` for dry-run).
-
-### Features
-
-- **Guaranteed JSON**: Instructions and sanitization ensure parseable JSON.
-- **Type Safe**: Strong typing of LLM responses.
-- **Mode**: Functions accept optional `mode?: "weak" | "normal" | "strong"`. Default is `"normal"`. Presets:
-  - **weak** — local backend (llama-cpp by default); no API key required. Default model: Llama 2.0 via a GGUF at `LLAMA_CPP_MODEL_PATH` (default `./models/model.gguf`). Shorter instructions, lower temperature.
-  - **normal** — OpenRouter with default model `gpt-5-nano`; requires `OPENROUTER_API_KEY`.
-  - **strong** — OpenRouter with default model `gpt-5.2`; requires `OPENROUTER_API_KEY`.
-  You can override by passing a custom `client` or `model`; explicit options always win over the preset.
-
-### Setup
-
-When you omit `client`, the default depends on `mode`: **weak** uses the local backend (no key); **normal** and **strong** use OpenRouter (set `OPENROUTER_API_KEY` in `.env`). Or pass a custom `client` (e.g. `createClient({ backend: "llama-cpp" })`).
+`.env` defaults (all optional):
 
 ```env
 OPENROUTER_API_KEY=sk-or-...
+LLAMA_CPP_MODEL_PATH=./models/model.gguf
+LLAMA_CPP_THREADS=6
+TRANSFORMERS_JS_MODEL_ID=Xenova/distilbart-cnn-6-6
 ```
 
-### Install `dotenv` if needed
+### Errors
+
+All errors throw `NxAiApiError`:
+
+| Code | Cause |
+|------|-------|
+| `MISSING_ENV` | Missing `OPENROUTER_API_KEY` |
+| `OPENROUTER_HTTP_ERROR` | Non-2xx from OpenRouter |
+| `TIMEOUT` | Request exceeded `timeoutMs` |
+| `MISSING_OPTIONAL_DEP` | Backend package not installed |
+
+---
+
+## Skill packs and content
+
+Instruction files live in a content store (git repo or local folder) under canonical keys:
+
+```
+skills/<skillId>/weak      ← local / cheap instructions
+skills/<skillId>/strong    ← cloud / high-quality instructions
+skills/<skillId>/ultra     ← highest-tier instructions (optional)
+skills/<skillId>/rules     ← JSON rules array (optional)
+```
+
+### Sync and publish
 
 ```bash
-npm i dotenv
+npm run content:sync           # write instructions to .content and push to skills repo
+npm run content:sync:optimize  # + run LLM optimization pass on each skill's instructions
+npm run content:index          # build the library index (io schemas, examples) via LLM
+npm run content:fixtures       # validate stored examples against io.output schemas (no API key)
+npm run content:layout-lint    # enforce folder-based layout; fail on root-level *-instructions.md
 ```
 
----
+Requires `SKILLS_PUBLISHER_TOKEN` or `GITHUB_TOKEN` for push. Optimization requires `OPENROUTER_API_KEY`.
 
-### JSON helpers
+### Finalize & optimize (full pipeline)
 
-For robust JSON from model output or when you need a single-JSON guarantee:
+To ship the library with all skills optimized and validated:
 
-- **`extractFirstJson(text)`** — Deterministic: finds the first brace-balanced `{...}` in a string and parses it. Returns `{ ok: true, data }` or `{ ok: false, errorCode, message }`. Use when the model may have wrapped JSON in markdown or prose.
-- **`parseJsonResponse(text, options?)`** — Runs `extractFirstJson` on `text`. If that fails and `options.llmFallback === true`, calls the LLM to extract the JSON from the text, then extracts again from the LLM output. Returns `{ ok: true, json }` or `{ ok: false, errorCode, message }`.
-- **`askJson<T>(params)`** — LLM call with an explicit "single JSON object only" guarantee. Params: `prompt`, `instructions: { weak, normal, strong? }`, optional `outputContract`, `requiredOutputShape`, `client`, `mode`, `model`. Returns `CallAIResult<T>`.
-
-```ts
-import { extractFirstJson, parseJsonResponse, askJson } from "light-skills/functions";
-
-const r1 = extractFirstJson("Some text then {\"a\": 1} more.");
-// r1.ok && r1.data === { a: 1 }
-
-const r2 = await parseJsonResponse(mixedText, { llmFallback: true });
-// r2.ok && use r2.json
-
-const r3 = await askJson<{ summary: string }>({
-  prompt: "Summarize in one sentence.",
-  instructions: { weak: "JSON only.", normal: "Return a single JSON object." },
-  outputContract: "Object with key 'summary' (string).",
-});
-// r3.data.summary
-```
-
-### `ask` (ai.ask) — Generic instruction skill
-
-Generic "do what the instruction says" skill. Builds INPUT_MD from instruction, output contract, and optional input data; returns parsed JSON. Runnable by name as `ai.ask`.
+1. **Code & tests:** `npm run typecheck && npm run build && npm run test:unit`
+2. **Content sync:** `npm run content:sync` (writes instructions/rules to `.content`, pushes). Use `content:sync:no-test` to skip the full test suite, or `--no-push` to only sync locally.
+3. **Optimize instructions (LLM):** `npm run content:sync:optimize` to run the optimizer on each skill’s weak/strong instructions and write reports to `reports/optimize/`. Requires `OPENROUTER_API_KEY`.
+4. **Library index:** `npm run content:index` to build the library index (I/O schemas, examples) so fixtures can run.
+5. **Validate:** `npm run content:fixtures` (validates index examples vs `io.output`), then `npm run content:layout-lint` (enforces folder-based keys only). If layout-lint fails (root-level `*-instructions.md` / `*-rules.json`), run `content:sync` once to populate folder-based keys, then remove the old root-level files in `.content` so layout-lint passes.
 
 ```ts
-import { ask, run } from "light-skills/functions";
-
-const data = await ask({
-  instruction: "Extract the main topic and two sub-topics from the input.",
-  outputContract: "Single JSON object with keys 'main' (string) and 'subTopics' (string[]).",
-  inputData: { text: "Long article..." },
-});
-// or: run("ai.ask", { instruction: "...", outputContract: "...", inputData: {...} })
-```
-
----
-
-### `matchLists` — Semantic List Matching
-
-Intelligently matches items from two lists based on semantic similarity and naming. Pass **`existingMatches`** from a previous run to avoid re-matching: list1 items already in `existingMatches` are skipped, only the rest are sent to the model, and results are merged so you get no doubles and no crash — safe to call as new records arrive.
-
-```ts
-import { matchLists } from "light-skills/functions";
-
-const result = await matchLists({
-  list1: source,
-  list2: target,
-  guidance: "Match by name, accepting close variants.",
-  existingMatches: previousRun.matches,  // optional: skip already-mapped list1 items
-  mode: "normal",  // optional: "weak" | "normal" | "strong"
-});
-```
-
----
-
-### `extractTopics` — Topic Extraction
-
-Extracts key topics from the provided text.
-
-```ts
-import { extractTopics } from "light-skills/functions";
-
-const { topics } = await extractTopics({ 
-  text: "Very long article about space exploration and NASA's next missions...",
-  maxTopics: 3,
-  mode: "normal",  // optional: "weak" | "normal" | "strong"
-});
-```
-
----
-
-### `extractEntities` — Named Entity Extraction
-
-Extracts named entities (People, Organizations, Locations, etc.) from the text.
-
-```ts
-import { extractEntities } from "light-skills/functions";
-
-const { entities } = await extractEntities({ 
-  text: "Apple was founded by Steve Jobs in Cupertino.",
-  mode: "normal",  // optional: "weak" | "normal" | "strong"
-});
-// [{ name: "Apple", type: "Organization" }, { name: "Steve Jobs", type: "Person" }, ...]
-```
-
----
-
-### `summarize` — Text Summarization
-
-Generates a concise summary and key points.
-
-```ts
-import { summarize } from "light-skills/functions";
-
-const { summary, keyPoints } = await summarize({ 
-  text: "...content...",
-  length: "brief",  // "brief" | "medium" | "detailed"
-  mode: "normal",   // optional: "weak" | "normal" | "strong"
-});
-```
-
----
-
-### `classify` — Text Classification
-
-Classifies text into one or more provided categories.
-
-```ts
-import { classify } from "light-skills/functions";
-
-const { categories } = await classify({ 
-  text: "I am having trouble with my subscription.",
-  categories: ["Billing", "Technical Support", "General Inquiry"],
-  mode: "normal",  // optional: "weak" | "normal" | "strong"
-});
-```
-
----
-
-### `sentiment` — Sentiment Analysis
-
-Analyzes the sentiment (positive, negative, or neutral).
-
-```ts
-import { sentiment } from "light-skills/functions";
-
-const { sentiment: label, score } = await sentiment({ 
-  text: "This is the best product ever!" 
-});
-```
-
----
-
-### `translate` — Translation
-
-Translates text to a target language.
-
-```ts
-import { translate } from "light-skills/functions";
-
-const { translatedText } = await translate({ 
-  text: "Hello, how are you?",
-  targetLanguage: "French" 
-});
-```
-
----
-
-### `rank` — Relevance Ranking
-
-Ranks a list of items based on a query.
-
-```ts
-import { rank } from "light-skills/functions";
-
-const { rankedItems } = await rank({
-  items: products,
-  query: "Affordable noise-cancelling headphones"
-});
-```
-
----
-
-### `cluster` — Semantic Clustering
-
-Groups a list of items into semantic clusters.
-
-```ts
-import { cluster } from "light-skills/functions";
-
-const { clusters } = await cluster({
-  items: userFeedbackList,
-  numClusters: 3
-});
-```
-
-> [!TIP]
-> **Flexible Schema**: For list operations (`matchLists`, `rank`, `cluster`), the structure of objects in your lists does not matter. The AI uses semantic similarity across all available fields.
-
-
----
-
-## Skill-by-name and content
-
-You can run functions by **skill name** and resolve instructions (and rules) from a configurable content source (e.g. nx-content with a Git or local backend).
-
-### Run by skill name (direct)
-
-```ts
-import { run, getSkillNames } from "light-skills/functions";
-
-const result = await run("extractTopics", {
-  text: "Long article...",
-  maxTopics: 5,
-  mode: "normal",
-});
-// result has the same shape as extractTopics()
-getSkillNames(); // ["matchLists", "extractTopics", ...]
-```
-
-### Run with content-resolved instructions
-
-When skill instructions live in your content store, use `runWithContent` with a resolver (from `getSkillsResolver`). Instructions and optional rules are loaded by skill key and mode (weak/normal/strong). See [Content-based skills catalog](docs/CONTENT_SKILLS.md) for a list of content-resolved skills (e.g. judge, compare, fixInstructions, generateRule) and which are orchestration-only.
-
-```ts
-import { getSkillsResolver } from "light-skills";
-import { runWithContent } from "light-skills/functions";
+import { getSkillsResolver, resolveSkillInstructions, pushSkillsContent } from "light-skills";
 
 const resolver = getSkillsResolver();
-// Override: getSkillsResolver({ localRoot: "./.content" }) or pass gitRepoUrl/gitToken
+const system = await resolveSkillInstructions(resolver, "judge", "strong");
 
-const result = await runWithContent(
-  "extractTopics",
-  { text: "...", mode: "normal" },
-  { resolver }
-);
+await pushSkillsContent({ localPath: "./.content", message: "chore: update skills" });
 ```
 
-You can override the content source via `getSkillsResolver(options)`: e.g. `localRoot`, `gitRepoUrl`, `gitToken`, or `mode` (dev/prod).
-
-### Resolve instructions and rules by key
-
-```ts
-import {
-  getSkillsResolver,
-  resolveSkillInstructions,
-  resolveSkillRules,
-} from "light-skills";
-
-const resolver = getSkillsResolver();
-const systemText = await resolveSkillInstructions(resolver, "ai.judge.v1", "normal");
-const rules = await resolveSkillRules(resolver, "ai.judge.v1");
-```
-
-### Publishing skill content
-
-To push skill content (instructions and rules) to your configured content backend, use `pushSkillsContent({ localPath })`. The directory at `localPath` must be a Git repo with the remote set. Set `SKILLS_PUBLISHER_TOKEN` or `GITHUB_TOKEN` in your environment (or use SSH) so push has write access. Never commit tokens; see `.env.example`.
-
-```ts
-import { pushSkillsContent } from "light-skills";
-
-const { committed, pushed } = await pushSkillsContent({
-  localPath: "./.content",
-  message: "chore: update skill content",
-});
-```
-
-### Test, sync instructions, and push (one command)
-
-To **test all skill functions**, **write current skill instructions** from the codebase into `.content`, and **push to the skills repo** in one go, use the `content:sync` script. It uses nx-content’s local backend and `pushToRemote()`. Pushing is **on by default** so the skills repo acts as the project's **memory** (persisted rules, instructions, and skill definitions); pass `--no-push` only when you want to sync locally without persisting (e.g. to review first).
-
-1. Builds the project and writes instruction files for every built-in skill (extractTopics, matchLists, summarize, etc.) into `.content` using the default instruction manifest.
-2. Runs the full test suite (`npm test`). If tests fail, it does not push.
-3. By default, commits and pushes `.content` to the remote so the remote stays the source of truth (memory). Pass `--no-push` only when you want to sync locally without persisting.
-
-If `.content` does not exist, the script **clones** the skills repo (e.g. [nx-morpheus/skills-functions](https://github.com/nx-morpheus/skills-functions)) into `.content`, so the remote’s existing files are preserved and the push adds the new `skills/` tree.
-
-```bash
-npm run content:sync
-```
-
-- **With optimization:** `npm run content:sync:optimize` or add `--optimize` to the script. Runs an LLM pass on each skill’s instructions (clarity/brevity), writes one **Markdown report per skill** to `reports/optimize/<skillName>.md` (original vs optimized, word counts, token usage, duration), then updates `.content` with the optimized instructions and pushes (unless `--no-push`). Use `--no-report` to skip writing reports; use `--skills=name1,name2` to run only on those skills; use `--only-file-based` to run only on file-only (new) skills first.
-- **Optimize new ones first:** `npm run content:sync:optimize:new` runs optimization with `--only-file-based --no-push` (no push). When you have content-only skills (no manifest entry), they are treated as “new”; run this first, then run full `content:sync:optimize` for all.
-- **Skip tests:** `npm run content:sync:no-test` or `npx tsx scripts/testOptimizeAndPush.ts -- --skip-tests`.
-- **Skip push (local-only):** `npx tsx scripts/testOptimizeAndPush.ts -- --no-push` or `--push=false`. Use only when you want to sync locally without persisting (e.g. review before pushing).
-
-Requires `SKILLS_PUBLISHER_TOKEN` or `GITHUB_TOKEN` for push (HTTPS). Optimization requires `OPENROUTER_API_KEY`. Add `.content/` to `.gitignore` if you don’t want to commit the local content clone. **If the remote repo is still empty,** see the detailed [Skills repo population plan](docs/SKILLS_REPO_POPULATION_PLAN.md) for prerequisites, steps, and troubleshooting.
-
-After a successful push, the remote will contain a **`skills/`** tree: e.g. `skills/extractTopics/weak.md`, `skills/extractTopics/normal.md`, `skills/matchLists/weak.md`, etc. You need write access to the repo for the push to succeed; otherwise the remote will stay empty of these files.
-
+**Contract stability:** Every skill has a versioned contract (`io.input`, `io.output`) in the library index. See [docs/CONTRACT_STABILITY.md](docs/CONTRACT_STABILITY.md).
 
 ---
 
 ## Testing
 
-Build, then run tests:
-
 ```bash
-npm run build && npm run test
+npm run build && npm test          # full suite (requires OPENROUTER_API_KEY)
+npm run test:unit                  # unit tests only — no API key, ~2 s
 ```
-
-- **`npm run test:unit`** — Runs only unit tests (excludes `*.live.test.ts`). Use for fast CI or when you don’t have `OPENROUTER_API_KEY` or a local model; completes in a few seconds.
-- **`npm run test`** — Full suite including live API verification (requires `OPENROUTER_API_KEY` for strong/normal; weak tests are skipped without a local model).
-- **Mocked tests** (`test/openrouter.parse.test.ts`, `test/openrouter.request.test.ts`, `test/functions.callAI.test.ts`): No API key required; they stub the client or HTTP.
-- **Live tests** (`test/library.live.test.ts`, `test/matchLists.live.test.ts`): Hit the real API. Set `OPENROUTER_API_KEY` in `.env` (or pass a `client` that uses your preferred backend) so library function tests can run.
 
 ---
 
-## Security notes
+## Security
 
-* Never commit `.env`
-* Don't log your OpenRouter or OpenAI key
-* Prefer setting attribution headers so your app is identifiable in OpenRouter analytics.
+- Never commit `.env`
+- Don't log API keys
+- Add `.content/` to `.gitignore`
 
 ---
 
 ## FAQ
 
-### Why `max_completion_tokens`?
+**Why `max_completion_tokens`?**
+OpenRouter recommends it; `max_tokens` is deprecated.
 
-OpenRouter recommends `max_completion_tokens`; `max_tokens` is deprecated.
+**Will token counts match across backends?**
+No. Tokenization is model-specific. `light-skills` normalizes the *shape* (`prompt_tokens`, `completion_tokens`, `total_tokens`); numbers are backend-specific.
 
-### Will token counts match between OpenRouter and local?
-
-No. Tokenization varies by model/backend. `light-skills` normalizes the *shape* of usage; the numbers are backend-specific.
-
+**Where is the full reference?**
+- [docs/CORE.md](docs/CORE.md) — core offering + capability checklist
+- [docs/LIBRARY.md](docs/LIBRARY.md) — full function reference
+- [docs/FUNCTIONS_SPEC.md](docs/FUNCTIONS_SPEC.md) — I/O types and SYSTEM/USER templates
+- [docs/CONTRACT_STABILITY.md](docs/CONTRACT_STABILITY.md) — versioned contracts, fixtures, validation
+- [docs/CONTENT_SKILLS.md](docs/CONTENT_SKILLS.md) — content-resolved skills catalog

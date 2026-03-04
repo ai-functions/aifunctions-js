@@ -102,22 +102,19 @@ export type UpdateLibraryIndexReport = {
 
 export type ValidationResult = { valid: boolean; errors?: string[] };
 
+/** Canonical: only folder-based keys skills/<skillId>/<file>. */
 function skillNameFromKey(key: string): string | null {
   const normalized = key.replace(/\\/g, "/").trim();
   if (!normalized.startsWith("skills/")) return null;
-  const after = normalized.slice("skills/".length);
-  const segment = after.split("/")[0];
-  if (!segment) return null;
-  const name = segment
-    .replace(/-instructions\.md$/i, "")
-    .replace(/-rules\.json$/i, "");
-  return name || null;
+  const parts = normalized.slice("skills/".length).split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  return parts[0] || null;
 }
 
 function fileKindForKey(key: string): SourceFileKind {
   const k = key.replace(/\\/g, "/").toLowerCase();
-  if (k.endsWith("-instructions.md") || /\/weak$|\/normal$|\/strong$/.test(k)) return "instructions";
-  if (k.endsWith("-rules.json") || k.endsWith("/rules")) return "rules";
+  if (/\/weak$|\/normal$|\/strong$|\/ultra$/.test(k) || k.endsWith(".md")) return "instructions";
+  if (k.endsWith("/rules") || k.endsWith(".json")) return "rules";
   if (k.includes("task") || k.includes("prompt")) return "prompt";
   return "other";
 }
@@ -321,7 +318,8 @@ export async function updateLibraryIndex(
         mode,
         model,
       });
-      llmResult = res.data;
+      llmResult = res.ok ? res.parsed : null;
+      if (!res.ok) lastError = res.message;
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
     }
@@ -590,7 +588,7 @@ type AskJsonFn = (p: {
   prompt: string;
   mode?: "weak" | "normal" | "strong";
   model?: string;
-}) => Promise<{ data: unknown }>;
+}) => Promise<{ ok: true; parsed: unknown } | { ok: false; errorCode: string; message: string; attemptsUsed: number; rawText: string }>;
 
 async function tryRepairPrompt(
   askJsonFn: AskJsonFn,
@@ -607,7 +605,7 @@ async function tryRepairPrompt(
       mode,
       model,
     });
-    return res.data;
+    return res.ok ? res.parsed : null;
   } catch {
     return null;
   }
@@ -626,7 +624,7 @@ async function tryFallbackPrompt(
       mode,
       model,
     });
-    return res.data;
+    return res.ok ? res.parsed : null;
   } catch {
     return null;
   }

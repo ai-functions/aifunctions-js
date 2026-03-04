@@ -38,14 +38,17 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test --ext .ts",
     "test": "node --test test/**/*.test.ts",
-    "test:unit": "node --test test/ai.ask.test.ts test/askJson.test.ts test/content.libraryIndex.test.ts test/content.skillsResolver.test.ts test/functions.callAI.test.ts test/functions.router.test.ts test/jsonHelpers.test.ts test/openrouter.parse.test.ts test/openrouter.request.test.ts test/parseJsonResponse.test.ts",
+    "test:unit": "node --test test/ai.ask.test.ts test/askJson.test.ts test/content.libraryIndex.test.ts test/content.skillsResolver.test.ts test/functions.callAI.test.ts test/functions.router.test.ts test/jsonHelpers.test.ts test/openrouter.parse.test.ts test/openrouter.request.test.ts test/parseJsonResponse.test.ts test/runJsonCompletion.test.ts test/safeJsonParse.test.ts test/validateJson.test.ts",
     "test:live:one": "node --test test/library.live.test.ts --test-name-pattern",
     "content:sync": "npm run build && tsx scripts/testOptimizeAndPush.ts",
     "content:sync:optimize": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --optimize",
     "content:sync:optimize:new": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --optimize --only-file-based --no-push",
     "content:sync:no-test": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --skip-tests",
     "content:index": "npm run build && tsx scripts/updateLibraryIndex.ts",
-    "content:index:dry": "npm run build && tsx scripts/updateLibraryIndex.ts -- --dry-run"
+    "content:index:dry": "npm run build && tsx scripts/updateLibraryIndex.ts -- --dry-run",
+    "content:fixtures": "tsx scripts/runFixtures.ts",
+    "content:layout-lint": "tsx scripts/lintContentLayout.ts",
+    "serve": "node dist/src/serve.js"
   },
   "engines": {
     "node": ">=18"
@@ -79,7 +82,10 @@
     "url": "https://github.com/nx-intelligence/light-skills/issues"
   },
   "dependencies": {
+    "ajv": "^8.17.0",
+    "extract-first-json": "^2.0.2",
     "nx-content": "^1.2.5",
+    "secure-json-parse": "^4.1.0",
     "simple-git": "^3.22.0",
     "x-llm": "^1.1.3"
   }

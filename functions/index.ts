@@ -36,8 +36,35 @@ export type { CallAIParams, CallAIResult, CallAIRule, SkillRunOptions, LlmMode }
 export { executeSkill, executeSkillStream, buildRequestPrompt } from "./core/index.js";
 export type { ExecuteSkillConfig, SkillInstructions } from "./core/index.js";
 
-export { extractFirstJson } from "./jsonHelpers.js";
-export type { ExtractFirstJsonResult, ExtractFirstJsonSuccess, ExtractFirstJsonFailure } from "./jsonHelpers.js";
+export { extractFirstJson, extractFirstJsonObject, NoJsonFoundError } from "./jsonHelpers.js";
+export type {
+  ExtractFirstJsonResult,
+  ExtractFirstJsonSuccess,
+  ExtractFirstJsonFailure,
+  ExtractFirstJsonObjectResult,
+} from "./jsonHelpers.js";
+
+export { runJsonCompletion } from "./runJsonCompletion.js";
+export type { RunJsonCompletionOptions } from "./runJsonCompletion.js";
+
+export type {
+  AiJsonResult,
+  AiJsonSuccess,
+  AiJsonError,
+  AiJsonErrorCode,
+  AiJsonValidation,
+  ValidationOk,
+  ValidationFail,
+} from "./aiJsonTypes.js";
+export {
+  ERR_NO_JSON_FOUND,
+  ERR_JSON_PARSE,
+  ERR_SCHEMA_INVALID,
+  isAiJsonError,
+  isAiJsonSuccess,
+} from "./aiJsonTypes.js";
+
+export { safeJsonParse, JsonParseError } from "./safeJsonParse.js";
 
 export { parseJsonResponse } from "./parseJsonResponse.js";
 export type {
@@ -47,17 +74,41 @@ export type {
     ParseJsonResponseFailure,
 } from "./parseJsonResponse.js";
 
-export { askJson } from "./askJson.js";
+export { askJson, toCallAIResult } from "./askJson.js";
 export type { AskJsonParams } from "./askJson.js";
 
 export { ask } from "./ai/ask.js";
 export type { AskParams } from "./ai/ask.js";
 
-export { run, runWithContent, getSkillNames, getSkillNamesAsync } from "./router.js";
-export type { ContentSkillMode, RunWithContentOptions, RunOptions } from "./router.js";
+export { optimizeInstruction } from "./optimizeInstruction.js";
+export type { OptimizeInstructionResult, OptimizeInstructionOptions } from "./optimizeInstruction.js";
+
+export { run, runWithContent, runSkill, getSkillNames, getSkillNamesAsync } from "./router.js";
+export type {
+  ContentSkillMode,
+  RunWithContentOptions,
+  RunOptions,
+  RunResultWithValidation,
+  RunSkillMode,
+  RunSkillParams,
+  RunSkillResult,
+} from "./router.js";
 
 export type { JudgeRule, JudgeOutput, WeightScale } from "./judge/types.js";
-export { normalizeJudgeRules, aggregateJudgeFeedback, judgeV1, fixInstructionsV1, generateRuleV1, generateJudgeRulesV1, optimizeInstructionsV1 } from "./judge/index.js";
+export {
+  normalizeJudgeRules,
+  aggregateJudgeFeedback,
+  judge,
+  judgeV1,
+  fixInstructions,
+  fixInstructionsV1,
+  generateRule,
+  generateRuleV1,
+  generateJudgeRules,
+  generateJudgeRulesV1,
+  optimizeInstructions,
+  optimizeInstructionsV1,
+} from "./judge/index.js";
 export type {
   NormalizeJudgeRulesRequest,
   NormalizeJudgeRulesOutput,
@@ -74,7 +125,14 @@ export type {
   OptimizeInstructionsOutput,
 } from "./judge/index.js";
 
-export { compareV1, raceModelsV1, generateInstructionsV1 } from "./orchestration/index.js";
+export {
+  compare,
+  compareV1,
+  raceModels,
+  raceModelsV1,
+  generateInstructions,
+  generateInstructionsV1,
+} from "./orchestration/index.js";
 export type {
   CompareRequest,
   CompareOutput,
@@ -84,9 +142,18 @@ export type {
   GenerateInstructionsOutput,
 } from "./orchestration/index.js";
 
-export { collectionMappingV1 } from "./recordsMapper/index.js";
+export { collectionMapping, collectionMappingV1 } from "./recordsMapper/index.js";
 export type {
   CollectionMappingRequest,
   CollectionMappingOutput,
   CollectionSummary,
 } from "./recordsMapper/index.js";
+
+export { validateOutput, validateAgainstSchema, validateJson } from "./validate/index.js";
+export type {
+  ValidateOutputResult,
+  ValidateOutputOptions,
+  ValidationResult,
+  ValidationResultOk,
+  ValidationResultFail,
+} from "./validate/index.js";

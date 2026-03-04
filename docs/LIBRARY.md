@@ -1,6 +1,6 @@
 # Library: Functions and skills
 
-**Canonical I/O and templates:** For every function’s **Request/Response**, **Modes** (weak / normal / strong), and **SYSTEM / USER (INPUT_MD)** templates, see [FUNCTIONS_SPEC.md](FUNCTIONS_SPEC.md). That spec also lists planned skills (judge, compare, fix-instructions, generate-rule, etc.) for content-based or future implementation, marks which are **generic** (use the core executor) vs **orchestration** or **deterministic**, and describes how to **improve instructions and rules for all of them** via `ai.optimize-instructions.v1` (bootstrap) and `ai.generate-instructions.v1` (iterative optimizer).
+**Canonical I/O and templates:** For every function’s **Request/Response**, **Modes** (weak / normal / strong), and **SYSTEM / USER (INPUT_MD)** templates, see [FUNCTIONS_SPEC.md](FUNCTIONS_SPEC.md). That spec also lists planned skills (judge, compare, fix-instructions, generate-rule, etc.) for content-based or future implementation, marks which are **generic** (use the core executor) vs **orchestration** or **deterministic**, and describes how to **improve instructions and rules for all of them** via `optimizeInstructions` (bootstrap) and `generateInstructions` (iterative optimizer).
 
 This document describes how the library is organized:
 
@@ -160,7 +160,7 @@ Any skill that is **not** in the [listed](#listed-functions-built-in-skills) set
 - **Instructions**: either file-based (`skills/<name>-instructions.md`) or legacy (`skills/<name>/weak`, `skills/<name>/normal`, `skills/<name>/strong`).
 - **Rules** (optional): either file-based (`skills/<name>-rules.json`) or legacy (`skills/<name>/rules`).
 
-When content exists for a given name, that name is discoverable via `getSkillNamesAsync(resolver)` and runnable via `run(skillName, request)` (or `runWithContent(skillName, request, { resolver })`). The library does not need to “list” these skills in code; they are available as long as the content is present in the repo. See [CONTENT_SKILLS.md](CONTENT_SKILLS.md) for a catalog of content-only skills (e.g. ai.judge.v1, compare, fixInstructions) and the content key conventions in [skillsResolver](../src/content/skillsResolver.ts).
+When content exists for a given name, that name is discoverable via `getSkillNamesAsync(resolver)` and runnable via `run(skillName, request)` (or `runWithContent(skillName, request, { resolver })`). The library does not need to “list” these skills in code; they are available as long as the content is present in the repo. See [CONTENT_SKILLS.md](CONTENT_SKILLS.md) for a catalog of content-only skills (e.g. judge, compare, fixInstructions) and the content key conventions in [skillsResolver](../src/content/skillsResolver.ts).
 
 ---
 

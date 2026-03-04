@@ -6,7 +6,7 @@ Skills whose **instructions and optional rules** are loaded from the content sto
 
 | Skill key / name | Purpose | Orchestration-only? |
 |------------------|---------|---------------------|
-| **ai.judge.v1** | Judge model output (e.g. against criteria or rules). | No |
+| **judge** | Judge model output (e.g. against criteria or rules). (Alias: `ai.judge.v1` still accepted.) | No |
 | **compare** | Compare two items or outputs (e.g. model A vs model B). | Yes — orchestrates other calls; no single LLM call with its own instruction pack. |
 | **fixInstructions** | Revise or fix instruction text. | No |
 | **generateRule** | Generate a rule (e.g. judge rule) from examples or description. | No |

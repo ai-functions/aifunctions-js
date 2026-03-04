@@ -66,7 +66,7 @@ export async function callAI<T>(params: CallAIParams): Promise<CallAIResult<T>> 
     let instruction =
         mode === "weak"
             ? instructions.weak
-            : mode === "strong"
+            : mode === "strong" || mode === "ultra"
               ? (instructions.strong ?? instructions.normal)
               : instructions.normal;
     if (rules?.length) instruction += formatRulesForInstruction(rules);
@@ -124,7 +124,7 @@ export async function* callAIStream(params: CallAIParams): AsyncGenerator<Stream
     let instruction =
         mode === "weak"
             ? instructions.weak
-            : mode === "strong"
+            : mode === "strong" || mode === "ultra"
               ? (instructions.strong ?? instructions.normal)
               : instructions.normal;
     if (rules?.length) instruction += formatRulesForInstruction(rules);

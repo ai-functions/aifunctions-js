@@ -1,8 +1,12 @@
 import { createClient, getSkillsResolver, getSkillNamesFromContent, resolveSkillInstructions, getSkillRules, resolveSkillRules } from "../src/index.js";
-import { executeSkill } from "./core/executor.js";
-import { buildRequestPrompt } from "./core/prompt.js";
 import type { Client } from "../src/index.js";
 import type { ContentResolver } from "nx-content";
+import { executeSkill } from "./core/executor.js";
+import { buildRequestPrompt } from "./core/prompt.js";
+import { askJson } from "./askJson.js";
+import { validateAgainstSchema } from "./validate/validateOutput.js";
+import type { ValidateOutputResult } from "./validate/validateOutput.js";
+import type { RestrictedJsonSchemaObject } from "../src/index.js";
 import { matchLists } from "./list-matcher/matchLists.js";
 import { extractTopics } from "./extraction/extractTopics.js";
 import { extractEntities } from "./extraction/extractEntities.js";
@@ -24,10 +28,21 @@ import { compareV1 } from "./orchestration/compareV1.js";
 import { raceModelsV1 } from "./orchestration/raceModelsV1.js";
 import { generateInstructionsV1 } from "./orchestration/generateInstructionsV1.js";
 import { collectionMappingV1 } from "./recordsMapper/collectionMappingV1.js";
+import { validateOutput } from "./validate/validateOutput.js";
 
 /** Options passed to built-in skills when run() has a resolver (e.g. rules from content). */
 export type SkillRunOptions = { rules?: Array<{ rule: string; weight: number }> };
 export type SkillFn = (params: unknown, opts?: SkillRunOptions) => Promise<unknown>;
+
+const judgeFn: SkillFn = (req: unknown, opts?: SkillRunOptions) => judgeV1(req as Parameters<typeof judgeV1>[0], opts);
+const fixInstructionsFn: SkillFn = (req: unknown) => fixInstructionsV1(req as Parameters<typeof fixInstructionsV1>[0]);
+const generateRuleFn: SkillFn = (req: unknown) => generateRuleV1(req as Parameters<typeof generateRuleV1>[0]);
+const generateJudgeRulesFn: SkillFn = (req: unknown) => generateJudgeRulesV1(req as Parameters<typeof generateJudgeRulesV1>[0]);
+const optimizeInstructionsFn: SkillFn = (req: unknown) => optimizeInstructionsV1(req as Parameters<typeof optimizeInstructionsV1>[0]);
+const compareFn: SkillFn = (req: unknown) => compareV1(req as Parameters<typeof compareV1>[0]);
+const raceModelsFn: SkillFn = (req: unknown) => raceModelsV1(req as Parameters<typeof raceModelsV1>[0]);
+const generateInstructionsFn: SkillFn = (req: unknown) => generateInstructionsV1(req as Parameters<typeof generateInstructionsV1>[0]);
+const collectionMappingFn: SkillFn = (req: unknown) => collectionMappingV1(req as Parameters<typeof collectionMappingV1>[0]);
 
 const SKILLS = {
   matchLists,
@@ -40,22 +55,64 @@ const SKILLS = {
   rank,
   cluster,
   "ai.ask": ask,
-  "ai.judge.v1": (req: unknown, opts?: SkillRunOptions) => judgeV1(req as Parameters<typeof judgeV1>[0], opts),
+  judge: judgeFn,
+  "ai.judge.v1": judgeFn,
   "ai.normalize-judge-rules.v1": (req: unknown) => Promise.resolve(normalizeJudgeRules(req as Parameters<typeof normalizeJudgeRules>[0])),
   "ai.aggregate-judge-feedback.v1": (req: unknown) => Promise.resolve(aggregateJudgeFeedback(req as Parameters<typeof aggregateJudgeFeedback>[0])),
-  "ai.fix-instructions.v1": (req: unknown) => fixInstructionsV1(req as Parameters<typeof fixInstructionsV1>[0]),
-  "ai.generate-rule.v1": (req: unknown) => generateRuleV1(req as Parameters<typeof generateRuleV1>[0]),
-  "ai.generate-judge-rules.v1": (req: unknown) => generateJudgeRulesV1(req as Parameters<typeof generateJudgeRulesV1>[0]),
-  "ai.optimize-instructions.v1": (req: unknown) => optimizeInstructionsV1(req as Parameters<typeof optimizeInstructionsV1>[0]),
-  "ai.compare.v1": (req: unknown) => compareV1(req as Parameters<typeof compareV1>[0]),
-  "ai.race-models.v1": (req: unknown) => raceModelsV1(req as Parameters<typeof raceModelsV1>[0]),
-  "ai.generate-instructions.v1": (req: unknown) => generateInstructionsV1(req as Parameters<typeof generateInstructionsV1>[0]),
-  "recordsMapper.collectionMapping.v1": (req: unknown) => collectionMappingV1(req as Parameters<typeof collectionMappingV1>[0]),
+  fixInstructions: fixInstructionsFn,
+  "ai.fix-instructions.v1": fixInstructionsFn,
+  generateRule: generateRuleFn,
+  "ai.generate-rule.v1": generateRuleFn,
+  generateJudgeRules: generateJudgeRulesFn,
+  "ai.generate-judge-rules.v1": generateJudgeRulesFn,
+  optimizeInstructions: optimizeInstructionsFn,
+  "ai.optimize-instructions.v1": optimizeInstructionsFn,
+  compare: compareFn,
+  "ai.compare.v1": compareFn,
+  raceModels: raceModelsFn,
+  "ai.race-models.v1": raceModelsFn,
+  generateInstructions: generateInstructionsFn,
+  "ai.generate-instructions.v1": generateInstructionsFn,
+  collectionMapping: collectionMappingFn,
+  "recordsMapper.collectionMapping.v1": collectionMappingFn,
 } as Record<string, SkillFn>;
+
+/** Canonical skill names returned by getSkillNames() (no V1/dotted aliases). */
+const PRIMARY_SKILL_NAMES: string[] = [
+  "matchLists",
+  "extractTopics",
+  "extractEntities",
+  "summarize",
+  "classify",
+  "sentiment",
+  "translate",
+  "rank",
+  "cluster",
+  "ai.ask",
+  "judge",
+  "compare",
+  "generateInstructions",
+  "optimizeInstructions",
+  "fixInstructions",
+  "generateRule",
+  "generateJudgeRules",
+  "raceModels",
+  "collectionMapping",
+  "ai.normalize-judge-rules.v1",
+  "ai.aggregate-judge-feedback.v1",
+];
 
 export type RunOptions = {
   /** Content resolver for dynamic skills (from git). When skill is not built-in, run() uses this to run via runWithContent. Default: getSkillsResolver() if skill not in registry. */
   resolver?: ContentResolver;
+  /** When true and resolver is set, validate the skill result against the library index io.output schema and return { result, validation }. Never throws on validation failure; validation.valid and validation.errors indicate contract compliance. */
+  validateOutput?: boolean;
+};
+
+/** Return type when run() is called with validateOutput: true. Result is always returned; validation indicates whether it passed the contract. */
+export type RunResultWithValidation = {
+  result: unknown;
+  validation: import("./validate/validateOutput.js").ValidateOutputResult;
 };
 
 /**
@@ -70,28 +127,79 @@ export async function run(
   options?: RunOptions
 ): Promise<unknown> {
   const fn = SKILLS[skill];
+  let result: unknown;
   if (fn) {
     let rules: Array<{ rule: string; weight: number }> = [];
     if (options?.resolver) {
       rules = await getSkillRules(options.resolver, skill);
       if (rules.length === 0) rules = await resolveSkillRules(options.resolver, skill);
     }
-    return fn(request, { rules });
+    result = await fn(request, { rules });
+  } else {
+    const resolver = options?.resolver ?? getSkillsResolver();
+    const fromContent = await getSkillNamesFromContent(resolver);
+    if (!fromContent.includes(skill)) {
+      const available = [...getSkillNames(), ...fromContent];
+      throw new Error(`Unknown skill: ${skill}. Available: ${available.join(", ")}`);
+    }
+    result = await runWithContent(skill, request, { resolver });
   }
-  const resolver = options?.resolver ?? getSkillsResolver();
-  const fromContent = await getSkillNamesFromContent(resolver);
-  if (!fromContent.includes(skill)) {
-    const available = [...getSkillNames(), ...fromContent];
-    throw new Error(`Unknown skill: ${skill}. Available: ${available.join(", ")}`);
+  if (options?.validateOutput && options?.resolver) {
+    const validation = await validateOutput(skill, result, { resolver: options.resolver });
+    return { result, validation };
   }
-  return runWithContent(skill, request, { resolver });
+  return result;
+}
+
+/** Canonical modes for runSkill (weak | strong | ultra). */
+export type RunSkillMode = "weak" | "strong" | "ultra";
+
+export type RunSkillParams = {
+  /** Skill name (e.g. "mySkill") or content prefix (e.g. "skills/mySkill"). Instructions loaded from skills/<id>/<mode>. */
+  key: string;
+  /** weak | strong | ultra. */
+  mode: RunSkillMode;
+  /** Raw USER prompt (INPUT_MD). */
+  inputMd: string;
+  /** Content resolver (e.g. getSkillsResolver()). */
+  resolver: ContentResolver;
+  client?: Client;
+  /** If provided, validate parsed output and return { data, validation }. */
+  outputSchema?: RestrictedJsonSchemaObject;
+};
+
+export type RunSkillResult = { data: unknown; validation: ValidateOutputResult };
+
+/**
+ * Run a skill by content key + raw input (advanced). Loads instructions from skills/<key>/<mode>, calls the model with inputMd as user prompt, returns parsed JSON.
+ * Use run(skillName, request) for the high-level function API; use runSkill when you have custom keys and raw INPUT_MD.
+ */
+export async function runSkill(params: RunSkillParams): Promise<RunSkillResult> {
+  const { key, mode, inputMd, resolver, client: providedClient, outputSchema } = params;
+  const skillName = key.replace(/^skills\//, "").split("/")[0] || key;
+  const instruction = await resolveSkillInstructions(resolver, skillName, mode);
+  const client = providedClient ?? createClient({ backend: "openrouter" });
+  const res = await askJson({
+    prompt: inputMd,
+    instructions: { weak: instruction, normal: instruction, strong: instruction },
+    client,
+    mode,
+  });
+  if (!res.ok) throw new Error(`${res.errorCode}: ${res.message}`);
+  const data = res.parsed;
+  if (outputSchema) {
+    const validation = validateAgainstSchema(data, outputSchema);
+    return { data, validation };
+  }
+  return { data, validation: { valid: true as const } };
 }
 
 /**
- * List built-in skill names (sync). Use getSkillNamesAsync(resolver) to include skills discovered from content.
+ * List built-in skill names (sync). Returns clean names (e.g. judge, compare); V1/dotted aliases are not listed.
+ * Use getSkillNamesAsync(resolver) to include skills discovered from content.
  */
 export function getSkillNames(): string[] {
-  return Object.keys(SKILLS);
+  return [...PRIMARY_SKILL_NAMES];
 }
 
 /**
@@ -107,8 +215,8 @@ export async function getSkillNamesAsync(
   return [...new Set([...builtIn, ...fromContent])];
 }
 
-/** Mode for content-resolved instructions (weak / normal / strong). */
-export type ContentSkillMode = "weak" | "normal" | "strong";
+/** Mode for content-resolved instructions (weak / normal / strong / ultra). Canonical files: weak, strong, ultra; API "normal" maps to strong. */
+export type ContentSkillMode = "weak" | "normal" | "strong" | "ultra";
 
 export type RunWithContentOptions = {
   /** Content resolver (e.g. from getSkillsResolver()). Required for runWithContent. */

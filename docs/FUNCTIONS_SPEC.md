@@ -13,7 +13,7 @@ Every LLM-backed function in this library follows the same convention:
 ## Generic vs non-generic
 
 - **Generic (use the core):** Single LLM call, same SYSTEM + USER (`INPUT_MD`) pattern. These go through the core executor: `ai.ask`, `ai.askJson`, listed skills (extractTopics, matchLists, summarize, …), and most content-based skills. They share one execution path and can all be improved by the optimization flows below.
-- **Non-generic:** Either **orchestration-only** (no direct LLM call: e.g. `ai.compare.v1`, `ai.race-models.v1`, `ai.generate-instructions.v1`) or **deterministic** (no LLM: `ai.parseJsonResponse` extraction, `ai.normalize-judge-rules.v1`, `ai.aggregate-judge-feedback.v1`). Orchestrators call other skills; they still benefit from having those skills’ instructions and rules improved.
+- **Non-generic:** Either **orchestration-only** (no direct LLM call: e.g. `compare`, `raceModels`, `generateInstructions`) or **deterministic** (no LLM: `ai.parseJsonResponse` extraction, `ai.normalize-judge-rules.v1`, `ai.aggregate-judge-feedback.v1`). Orchestrators call other skills; they still benefit from having those skills’ instructions and rules improved.
 
 **Use the optimization flows below on all of them** — i.e. improve instructions and rules for every skill (generic or the ones an orchestrator calls).
 
@@ -23,24 +23,24 @@ Every LLM-backed function in this library follows the same convention:
 
 Use these to improve instructions and rules for **any** skill (generic or the skills used inside orchestrators):
 
-- **`ai.optimize-instructions.v1`** — **One-shot (or few-shot) tune-up.** Input: seed instructions + optional good/bad examples. Output: **better instructions + better examples + judgeRules**. Use when you want a quick bootstrap. Then run the output judgeRules through **`ai.normalize-judge-rules.v1`**.
-- **`ai.generate-instructions.v1`** — **Iterative optimizer loop.** Input: seed instructions (e.g. from optimize-instructions) + test cases + judgeRules (e.g. normalized) + target score. Runs cycles: run model → judge → fix/generate-rule until average score crosses target (or max cycles). Use when you want to **really** optimize toward a target score.
+- **`optimizeInstructions`** — **One-shot (or few-shot) tune-up.** Input: seed instructions + optional good/bad examples. Output: **better instructions + better examples + judgeRules**. Use when you want a quick bootstrap. Then run the output judgeRules through **`ai.normalize-judge-rules.v1`**.
+- **`generateInstructions`** — **Iterative optimizer loop.** Input: seed instructions (e.g. from optimizeInstructions) + test cases + judgeRules (e.g. normalized) + target score. Runs cycles: run model → judge → fix/generate-rule until average score crosses target (or max cycles). Use when you want to **really** optimize toward a target score.
 
 **How to pick (in practice):**
 
-1. **Start here (best default): `ai.optimize-instructions.v1`**
+1. **Start here (best default): `optimizeInstructions`**
    - You have seed instructions and maybe a couple good/bad examples.
    - Output: **better instructions + better examples + judgeRules**.
    - Then run the result through **`ai.normalize-judge-rules.v1`**.
 
-2. **Then do this for real optimization: `ai.generate-instructions.v1`**
+2. **Then do this for real optimization: `generateInstructions`**
    - Use the **optimizedInstructions** from step 1 as the seed.
    - Use the **judgeRules** (normalized).
    - Run cycles until your **average score crosses target** (or keep improving with `forceContinueAfterPass`).
 
 **If you don’t have rules at all:**
 
-- Call **`ai.generate-judge-rules.v1`** (or let the orchestration auto-generate them), then **`ai.normalize-judge-rules.v1`**.
+- Call **`generateJudgeRules`** (or let the orchestration auto-generate them), then **`ai.normalize-judge-rules.v1`**.
 
 **Summary:**
 
@@ -818,17 +818,17 @@ For judge/compare/race-models/generate-instructions:
 | ai.ask | Generic | Implemented |
 | ai.parseJsonResponse | Deterministic (+ optional LLM fallback) | Implemented |
 | ai.askJson | Generic | Implemented |
-| recordsMapper.collectionMapping.v1 | Generic | Spec only |
-| ai.judge.v1 | Generic | Spec only |
-| ai.compare.v1 | Orchestration | Spec only |
-| ai.fix-instructions.v1 | Generic | Spec only |
-| ai.generate-rule.v1 | Generic | Spec only |
-| ai.generate-judge-rules.v1 | Generic | Spec only |
-| ai.normalize-judge-rules.v1 | Deterministic | Spec only |
-| ai.aggregate-judge-feedback.v1 | Deterministic | Spec only |
-| ai.race-models.v1 | Orchestration | Spec only |
-| ai.generate-instructions.v1 | Orchestration | Spec only |
-| ai.optimize-instructions.v1 | Generic | Spec only |
+| collectionMapping | Generic | Implemented (run name: `collectionMapping` or `recordsMapper.collectionMapping.v1`) |
+| judge | Generic | Implemented (run name: `judge` or `ai.judge.v1`) |
+| compare | Orchestration | Implemented (run name: `compare` or `ai.compare.v1`) |
+| fixInstructions | Generic | Implemented (run name: `fixInstructions` or `ai.fix-instructions.v1`) |
+| generateRule | Generic | Implemented (run name: `generateRule` or `ai.generate-rule.v1`) |
+| generateJudgeRules | Generic | Implemented (run name: `generateJudgeRules` or `ai.generate-judge-rules.v1`) |
+| ai.normalize-judge-rules.v1 | Deterministic | Implemented |
+| ai.aggregate-judge-feedback.v1 | Deterministic | Implemented |
+| raceModels | Orchestration | Implemented (run name: `raceModels` or `ai.race-models.v1`) |
+| generateInstructions | Orchestration | Implemented (run name: `generateInstructions` or `ai.generate-instructions.v1`) |
+| optimizeInstructions | Generic | Implemented (run name: `optimizeInstructions` or `ai.optimize-instructions.v1`) |
 | extractTopics, extractEntities, matchLists, summarize, classify, sentiment, translate, rank, cluster | Generic | Implemented (listed skills) |
 
-Spec-only functions can be added as **content-based skills** (instructions + rules in git) and run via `run(skillName, request, { resolver })` once content exists, or implemented as built-in/orchestrators later. Use **optimize-instructions** (bootstrap) and **generate-instructions** (iterative) to improve instructions and rules for all of them.
+Use **optimizeInstructions** (bootstrap) and **generateInstructions** (iterative) to improve instructions and rules for all of them. V1/dotted names (e.g. `ai.judge.v1`) remain accepted as deprecated aliases for `run()` and REST.

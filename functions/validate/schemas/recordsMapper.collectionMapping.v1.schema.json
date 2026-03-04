@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schemaVersion", "collectionMatchConfidence", "fieldMappings"],
+  "properties": {
+    "schemaVersion": {
+      "const": "xmemory.records-mapper.llm.collection-mapping.v1"
+    },
+    "collectionMatchConfidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "reason": { "type": "string" },
+    "fieldMappings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["leftField", "rightField", "confidence"],
+        "properties": {
+          "leftField": { "type": "string" },
+          "rightField": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "reason": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}
