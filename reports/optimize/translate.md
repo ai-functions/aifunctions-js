@@ -1,6 +1,6 @@
 # Optimization report: translate
 
-Generated: 2026-03-04T14:05:29.838Z
+Generated: 2026-03-04T15:23:14.070Z
 
 ## Weak mode
 
@@ -17,19 +17,19 @@ Words: 22
 ### Optimized
 
 ```
-Translate the following text into the requested language, preserving tone and context. Respond in JSON with fields "translatedText" and "detectedSourceLanguage".
+Translate the given text into the requested language, preserving tone and context. Respond in JSON with the keys "translatedText" and "detectedSourceLanguage".
 ```
 
-Words: 20 (-2)
+Words: 21 (-1)
 
 ### Optimization details
 
 | Metric | Value |
 |--------|-------|
-| Duration (ms) | 21204 |
+| Duration (ms) | 18241 |
 | Prompt tokens | 111 |
-| Completion tokens | 1137 |
-| Total tokens | 1248 |
+| Completion tokens | 1053 |
+| Total tokens | 1164 |
 
 ---
 
@@ -49,7 +49,7 @@ Words: 32
 ### Optimized
 
 ```
-Translate the following text into the requested language. Maintain the original tone and context. Detect the source language and include it in your response. Respond in JSON format with 'translatedText' and 'detectedSourceLanguage'.
+Translate the given text into the target language, preserving tone and context. Detect the source language and include it in the response. Return a JSON object with the keys \"translatedText\" and \"detectedSourceLanguage\".
 ```
 
 Words: 32 (+0)
@@ -58,7 +58,7 @@ Words: 32 (+0)
 
 | Metric | Value |
 |--------|-------|
-| Duration (ms) | 15488 |
+| Duration (ms) | 10264 |
 | Prompt tokens | 116 |
-| Completion tokens | 876 |
-| Total tokens | 992 |
+| Completion tokens | 800 |
+| Total tokens | 916 |

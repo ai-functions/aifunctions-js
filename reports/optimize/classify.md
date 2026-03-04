@@ -1,6 +1,6 @@
 # Optimization report: classify
 
-Generated: 2026-03-04T14:04:49.218Z
+Generated: 2026-03-04T15:22:37.917Z
 
 ## Weak mode
 
@@ -16,19 +16,19 @@ Words: 10
 ### Optimized
 
 ```
-Classify the input into Category A or Category B. Return only a JSON object of the form: {"categories": ["Category A"]} or {"categories": ["Category B"]}.
+Classify input as either Category A or Category B. Respond only with JSON: {"categories": ["SelectedCategory"]}.
 ```
 
-Words: 24 (+14)
+Words: 15 (+5)
 
 ### Optimization details
 
 | Metric | Value |
 |--------|-------|
-| Duration (ms) | 20829 |
+| Duration (ms) | 15267 |
 | Prompt tokens | 99 |
-| Completion tokens | 2038 |
-| Total tokens | 2137 |
+| Completion tokens | 1298 |
+| Total tokens | 1397 |
 
 ---
 
@@ -47,16 +47,16 @@ Words: 16
 ### Optimized
 
 ```
-Classify text into one of two categories: Category A or Category B. Select exactly one. Output a JSON object in this format: {"categories": ["<SelectedCategory>"], "confidence": 0-1}.
+Classify the input text into exactly one of: Category A or Category B. Return JSON: {"categories": ["<selected category>"], "confidence": <0-1>}.
 ```
 
-Words: 26 (+10)
+Words: 20 (+4)
 
 ### Optimization details
 
 | Metric | Value |
 |--------|-------|
-| Duration (ms) | 24189 |
+| Duration (ms) | 21083 |
 | Prompt tokens | 105 |
-| Completion tokens | 1231 |
-| Total tokens | 1336 |
+| Completion tokens | 1255 |
+| Total tokens | 1360 |

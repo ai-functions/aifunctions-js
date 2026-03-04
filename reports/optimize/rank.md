@@ -1,6 +1,6 @@
 # Optimization report: rank
 
-Generated: 2026-03-04T14:05:51.482Z
+Generated: 2026-03-04T15:23:31.890Z
 
 ## Weak mode
 
@@ -15,19 +15,19 @@ Words: 31
 ### Optimized
 
 ```
-Rank items by relevance to the query. For each item, provide a score in [0,1] and a brief reason. Return JSON with a rankedItems array. Each element must include the original object in the item field, along with its score and reason.
+Rank items by relevance to the query. For each item, provide a score (0-1) and a brief reason. Return a JSON object with a 'rankedItems' array; each element should include 'item' (full original object), 'score' (0-1), and 'reason'.
 ```
 
-Words: 42 (+11)
+Words: 38 (+7)
 
 ### Optimization details
 
 | Metric | Value |
 |--------|-------|
-| Duration (ms) | 19769 |
+| Duration (ms) | 17816 |
 | Prompt tokens | 124 |
-| Completion tokens | 1534 |
-| Total tokens | 1658 |
+| Completion tokens | 1280 |
+| Total tokens | 1404 |
 
 ---
 
@@ -47,16 +47,16 @@ Words: 43
 ### Optimized
 
 ```
-Rank the provided items by relevance to the query. For each item, provide a score between 0 and 1 and a brief reason. Respond with a JSON object containing a single field rankedItems, which is an array. Each element must preserve the original item in the item field and include a score (0-1) and a reason (concise).
+Rank the given items by relevance to the query. For each item, provide a relevance score between 0 and 1 and a brief justification. Return JSON with a 'rankedItems' array. Each element's 'item' field must contain the full original object.
 ```
 
-Words: 57 (+14)
+Words: 40 (-3)
 
 ### Optimization details
 
 | Metric | Value |
 |--------|-------|
-| Duration (ms) | 21634 |
+| Duration (ms) | 13067 |
 | Prompt tokens | 129 |
-| Completion tokens | 2588 |
-| Total tokens | 2717 |
+| Completion tokens | 778 |
+| Total tokens | 907 |

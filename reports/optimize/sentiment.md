@@ -1,6 +1,6 @@
 # Optimization report: sentiment
 
-Generated: 2026-03-04T14:05:08.631Z
+Generated: 2026-03-04T15:22:55.792Z
 
 ## Weak mode
 
@@ -18,19 +18,19 @@ Words: 31
 ### Optimized
 
 ```
-Analyze the sentiment of the provided text and classify it as positive, negative, or neutral. Provide a confidence score between 0 and 1. Respond in JSON format with keys: "sentiment" and "score".
+Analyze the sentiment of the provided text and output a JSON object with keys sentiment and score, where sentiment is one of 'positive', 'negative', or 'neutral', and score is a number between 0 and 1.
 ```
 
-Words: 32 (+1)
+Words: 35 (+4)
 
 ### Optimization details
 
 | Metric | Value |
 |--------|-------|
-| Duration (ms) | 19410 |
+| Duration (ms) | 17871 |
 | Prompt tokens | 127 |
-| Completion tokens | 1627 |
-| Total tokens | 1754 |
+| Completion tokens | 1534 |
+| Total tokens | 1661 |
 
 ---
 
@@ -50,16 +50,16 @@ Words: 31
 ### Optimized
 
 ```
-Analyze the sentiment of the provided text and classify it as 'positive', 'negative', or 'neutral'. Return a JSON object containing the keys 'sentiment' (one of the three labels) and 'score' (a confidence value between 0 and 1).
+Determine the sentiment of the provided text. Classify it as 'positive', 'negative', or 'neutral'. Return a JSON object with keys 'sentiment' and 'score', where 'score' is a number in [0,1].
 ```
 
-Words: 37 (+6)
+Words: 30 (-1)
 
 ### Optimization details
 
 | Metric | Value |
 |--------|-------|
-| Duration (ms) | 18834 |
+| Duration (ms) | 13648 |
 | Prompt tokens | 121 |
-| Completion tokens | 1169 |
-| Total tokens | 1290 |
+| Completion tokens | 915 |
+| Total tokens | 1036 |

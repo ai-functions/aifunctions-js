@@ -8,7 +8,10 @@
  * 5) By default pushes local content to remote via nx-content's pushToRemote().
  *
  * Flags:
- *   --optimize     Run optimization on each skill's instructions; write reports to reports/optimize/ and update content.
+ *   --optimize          Run optimization on each skill's instructions; write reports to reports/optimize/ and update content.
+ *   --report / --no-report  When --optimize: write report files (default: true). Use --no-report to skip.
+ *   --skills=name1,name2   Only run optimization on these skills (default: all).
+ *   --only-file-based     Only run optimization on "new" skills (file-only, no manifest entry). Use this to run on new ones first.
  *   --skip-tests   Skip build and test; only write instructions and optionally push.
  *   --no-push      Do not push to git (default: push).
  *
@@ -163,15 +166,35 @@ function buildReportMdSingle(
   ].join("\n");
 }
 
+function parseSkillsFilter(args: string[]): string[] | undefined {
+  const eq = args.find((a) => a.startsWith("--skills="));
+  if (!eq) return undefined;
+  const list = eq.split("=")[1]?.trim();
+  if (!list) return undefined;
+  return list.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const skipTests = args.includes("--skip-tests");
   const doOptimize = args.includes("--optimize");
+  /** When --optimize, write reports unless --no-report. */
+  const writeReports = parseBoolArg(args, "report", doOptimize);
+  /** Only optimize these skills when set; otherwise all. */
+  const skillsFilter = parseSkillsFilter(args);
+  /** Only optimize file-only (new) skills when set. */
+  const onlyFileBased = args.includes("--only-file-based");
   /** By default push to git; set --no-push or --push=false to skip. */
   const pushToGit = parseBoolArg(args, "push", true);
 
   console.log("Content root:", contentDir);
-  if (doOptimize) console.log("Optimization: enabled (--optimize)");
+  if (doOptimize) {
+    console.log("Optimization: enabled (--optimize)");
+    if (writeReports) console.log("Reports: enabled (reports/optimize/)");
+    else console.log("Reports: disabled (--no-report)");
+    if (skillsFilter?.length) console.log("Skills filter:", skillsFilter.join(", "));
+    if (onlyFileBased) console.log("Only file-based (new) skills: yes");
+  }
   if (!pushToGit) console.log("Push to git: disabled (--no-push)");
 
   if (!fs.existsSync(contentDir)) {
@@ -245,29 +268,50 @@ async function main(): Promise<void> {
   console.log("Wrote", written, "files (instructions + rules); processing", currentInstructions.size, "skills (legacy) +", fileOnlyInstructions.size, "file-based only.");
 
   if (doOptimize) {
-    fs.mkdirSync(reportsDir, { recursive: true });
-    console.log("Optimizing instructions (LLM) and writing reports to", reportsDir, "...");
-    for (const [skillName, instr] of currentInstructions) {
+    const matchesFilter = (name: string) => !skillsFilter || skillsFilter.includes(name);
+    const legacyToRun = onlyFileBased
+      ? new Map<string, { weak: string; normal: string }>()
+      : new Map([...currentInstructions].filter(([name]) => matchesFilter(name)));
+    const fileOnlyToRun = new Map(
+      [...fileOnlyInstructions].filter(([name]) => matchesFilter(name))
+    );
+    if (onlyFileBased) {
+      legacyToRun.clear();
+    }
+    const totalToRun = legacyToRun.size + fileOnlyToRun.size;
+    if (totalToRun === 0) {
+      console.log(
+        "No skills to optimize (--only-file-based with no file-only skills? or --skills= none match). Skipping."
+      );
+    } else {
+      fs.mkdirSync(reportsDir, { recursive: true });
+      console.log(
+        "Optimizing instructions (LLM)" +
+          (writeReports ? ` and writing reports to ${reportsDir}` : "") +
+          "..."
+      );
+      for (const [skillName, instr] of legacyToRun) {
       try {
         const [weakResult, normalResult] = await Promise.all([
           optimizeInstruction(instr.weak, "weak", skillName),
           optimizeInstruction(instr.normal, "normal", skillName),
         ]);
-        const reportMd = buildReportMd(skillName, {
-          original: instr.weak,
-          optimized: weakResult.optimized,
-          usage: weakResult.usage,
-          durationMs: weakResult.durationMs,
-        }, {
-          original: instr.normal,
-          optimized: normalResult.optimized,
-          usage: normalResult.usage,
-          durationMs: normalResult.durationMs,
-        });
-        const reportPath = path.join(reportsDir, `${skillName}.md`);
-        fs.writeFileSync(reportPath, reportMd, "utf-8");
-        console.log("  Report:", reportPath);
-
+        if (writeReports) {
+          const reportMd = buildReportMd(skillName, {
+            original: instr.weak,
+            optimized: weakResult.optimized,
+            usage: weakResult.usage,
+            durationMs: weakResult.durationMs,
+          }, {
+            original: instr.normal,
+            optimized: normalResult.optimized,
+            usage: normalResult.usage,
+            durationMs: normalResult.durationMs,
+          });
+          const reportPath = path.join(reportsDir, `${skillName}.md`);
+          fs.writeFileSync(reportPath, reportMd, "utf-8");
+          console.log("  Report:", reportPath);
+        }
         const weakKey = skillInstructionsKeyForMode(skillName, "weak");
         const normalKey = skillInstructionsKeyForMode(skillName, "normal");
         await resolver.set(weakKey, weakResult.optimized);
@@ -276,26 +320,31 @@ async function main(): Promise<void> {
       } catch (err) {
         console.error("  Optimization failed for", skillName, err);
       }
-    }
-    for (const [skillName, content] of fileOnlyInstructions) {
+      }
+      for (const [skillName, content] of fileOnlyToRun) {
       try {
         const result = await optimizeInstruction(content, "normal", skillName);
-        const reportMd = buildReportMdSingle(
-          skillName,
-          content,
-          result.optimized,
-          result.usage,
-          result.durationMs
-        );
-        const reportPath = path.join(reportsDir, `${skillName}.md`);
-        fs.writeFileSync(reportPath, reportMd, "utf-8");
-        console.log("  Report (file-based):", reportPath);
+        if (writeReports) {
+          const reportMd = buildReportMdSingle(
+            skillName,
+            content,
+            result.optimized,
+            result.usage,
+            result.durationMs
+          );
+          const reportPath = path.join(reportsDir, `${skillName}.md`);
+          fs.writeFileSync(reportPath, reportMd, "utf-8");
+          console.log("  Report (file-based):", reportPath);
+        }
         await setSkillInstructions(resolver, skillName, result.optimized);
       } catch (err) {
         console.error("  Optimization failed for (file-based)", skillName, err);
       }
+      }
+      console.log(
+        "Optimization done." + (writeReports ? ` Reports in ${reportsDir}` : "")
+      );
     }
-    console.log("Optimization done. Reports in", reportsDir);
   }
 
   if (!skipTests) {

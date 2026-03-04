@@ -1,6 +1,6 @@
 # Optimization report: extractEntities
 
-Generated: 2026-03-04T14:04:05.073Z
+Generated: 2026-03-04T15:22:03.718Z
 
 ## Weak mode
 
@@ -17,19 +17,19 @@ Words: 16
 ### Optimized
 
 ```
-Extract entities: Person, Organization, Location, Date, Product. JSON ONLY: {"entities": [{"name": "...", "type": "..."}]} No chat.
+Skill: extractEntities. Mode: weak. Extract entities of types Person, Organization, Location, Date, Product from the input text. Output JSON only: {"entities": [{"name": "...", "type": "..."}]} No chat.
 ```
 
-Words: 16 (+0)
+Words: 27 (+11)
 
 ### Optimization details
 
 | Metric | Value |
 |--------|-------|
-| Duration (ms) | 16015 |
+| Duration (ms) | 10508 |
 | Prompt tokens | 113 |
-| Completion tokens | 1090 |
-| Total tokens | 1203 |
+| Completion tokens | 1189 |
+| Total tokens | 1302 |
 
 ---
 
@@ -49,16 +49,16 @@ Words: 31
 ### Optimized
 
 ```
-Extract named entities from the input text. Focus on Person, Organization, Location, Date, and Product. For each entity, provide name, type, and a brief context. Respond in JSON exactly as: {"entities": [{"name": "...", "type": "...", "context": "..."}]}
+Extract named entities from the input text. Target entity types: Person, Organization, Location, Date, Product. For each entity, include the name, type, and a brief context. Return a JSON object with the exact shape: {"entities": [{"name": "...", "type": "...", "context": "..."}]}.
 ```
 
-Words: 37 (+6)
+Words: 41 (+10)
 
 ### Optimization details
 
 | Metric | Value |
 |--------|-------|
-| Duration (ms) | 12946 |
+| Duration (ms) | 11205 |
 | Prompt tokens | 129 |
-| Completion tokens | 853 |
-| Total tokens | 982 |
+| Completion tokens | 892 |
+| Total tokens | 1021 |

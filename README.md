@@ -225,6 +225,8 @@ All errors throw `NxAiApiError`:
 
 `light-skills` ships a set of utility functions for guaranteed JSON output from an LLM — importable via the `light-skills/functions` sub-path. **Full reference:** [docs/LIBRARY.md](docs/LIBRARY.md) lists every listed (built-in) function, explains unlisted (content-based) skills, and the core helpers. **I/O and templates:** [docs/FUNCTIONS_SPEC.md](docs/FUNCTIONS_SPEC.md) defines Request/Response, Modes (weak/normal/strong), and SYSTEM / USER (`INPUT_MD`) templates for all functions (including judge, compare, fix-instructions, optimize-instructions, etc.).
 
+**Library index (v1):** A structured JSON index of all skills (id, description, input/output schema, runtime) for discovery and automation. See [docs/skills-index.v1.md](docs/skills-index.v1.md). API: `getLibraryIndex({ resolver })`, `updateLibraryIndex({ resolver, dryRun?, incremental? })`, `validateLibraryIndex(index)` / `validateSkillIndexEntry(entry)`. CLI: `npm run content:index` (or `content:index:dry` for dry-run).
+
 ### Features
 
 - **Guaranteed JSON**: Instructions and sanitization ensure parseable JSON.
@@ -517,7 +519,8 @@ If `.content` does not exist, the script **clones** the skills repo (e.g. [nx-mo
 npm run content:sync
 ```
 
-- **With optimization:** `npm run content:sync:optimize` or add `--optimize` to the script. Runs an LLM pass on each skill’s instructions (clarity/brevity), writes one **Markdown report per skill** to `reports/optimize/<skillName>.md` (original vs optimized, word counts, token usage, duration), then updates `.content` with the optimized instructions and pushes (unless `--no-push`).
+- **With optimization:** `npm run content:sync:optimize` or add `--optimize` to the script. Runs an LLM pass on each skill’s instructions (clarity/brevity), writes one **Markdown report per skill** to `reports/optimize/<skillName>.md` (original vs optimized, word counts, token usage, duration), then updates `.content` with the optimized instructions and pushes (unless `--no-push`). Use `--no-report` to skip writing reports; use `--skills=name1,name2` to run only on those skills; use `--only-file-based` to run only on file-only (new) skills first.
+- **Optimize new ones first:** `npm run content:sync:optimize:new` runs optimization with `--only-file-based --no-push` (no push). When you have content-only skills (no manifest entry), they are treated as “new”; run this first, then run full `content:sync:optimize` for all.
 - **Skip tests:** `npm run content:sync:no-test` or `npx tsx scripts/testOptimizeAndPush.ts -- --skip-tests`.
 - **Skip push (local-only):** `npx tsx scripts/testOptimizeAndPush.ts -- --no-push` or `--push=false`. Use after optimization if you want to review before pushing the best version or rules.
 

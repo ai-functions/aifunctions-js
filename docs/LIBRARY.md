@@ -1,11 +1,11 @@
 # Library: Functions and skills
 
-**Canonical I/O and templates:** For every function’s **Request/Response**, **Modes** (weak / normal / strong), and **SYSTEM / USER (INPUT_MD)** templates, see [FUNCTIONS_SPEC.md](FUNCTIONS_SPEC.md). That spec also lists planned skills (judge, compare, fix-instructions, generate-rule, etc.) for content-based or future implementation.
+**Canonical I/O and templates:** For every function’s **Request/Response**, **Modes** (weak / normal / strong), and **SYSTEM / USER (INPUT_MD)** templates, see [FUNCTIONS_SPEC.md](FUNCTIONS_SPEC.md). That spec also lists planned skills (judge, compare, fix-instructions, generate-rule, etc.) for content-based or future implementation, marks which are **generic** (use the core executor) vs **orchestration** or **deterministic**, and describes how to **improve instructions and rules for all of them** via `ai.optimize-instructions.v1` (bootstrap) and `ai.generate-instructions.v1` (iterative optimizer).
 
 This document describes how the library is organized:
 
 1. **Listed functions** — Built-in skills that are always available. They are implemented in code and registered by name (e.g. `extractTopics`, `matchLists`). You can call them directly or via `run(skillName, request)`.
-2. **Unlisted (content-based) functions** — Any skill that has instructions (and optional rules) in the content repo is runnable even if it is not in the list below. As long as the content for that skill exists in git (e.g. `skills/<name>-instructions.md` and optionally `skills/<name>-rules.json`), you can run it with `run(skillName, request)` or `runWithContent(skillName, request, { resolver })`. See [Content-based skills](#content-based-skills-unlisted) and [CONTENT_SKILLS.md](CONTENT_SKILLS.md).
+2. **Unlisted (content-based) functions** — Any skill that has instructions (and optional rules) in the content repo is runnable even if it is not in the list below. As long as the content for that skill exists in git (e.g. `skills/<name>-instructions.md` and optionally `skills/<name>-rules.json`), you can run it with `run(skillName, request)` or `runWithContent(skillName, request, { resolver })`. For a **generic** add/manage story (I/O known in the repo, optional validation), see [GENERIC_SKILLS_IO.md](GENERIC_SKILLS_IO.md) and the library index ([skills-index.v1.md](skills-index.v1.md)). See also [Content-based skills](#content-based-skills-unlisted) and [CONTENT_SKILLS.md](CONTENT_SKILLS.md).
 
 All listed skills support optional **rules** from content: when you call `run(skillName, request, { resolver })`, the resolver is used to load rules for that skill (if present) and they are applied automatically to the model’s system instruction.
 

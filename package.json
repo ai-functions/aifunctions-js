@@ -1,6 +1,6 @@
 {
   "name": "light-skills",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Minimal ask() API for remote (OpenRouter) and local (llama.cpp / Transformers.js) LLMs",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -39,7 +39,10 @@
     "test": "node --test test/**/*.test.ts",
     "content:sync": "npm run build && tsx scripts/testOptimizeAndPush.ts",
     "content:sync:optimize": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --optimize",
-    "content:sync:no-test": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --skip-tests"
+    "content:sync:optimize:new": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --optimize --only-file-based --no-push",
+    "content:sync:no-test": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --skip-tests",
+    "content:index": "npm run build && tsx scripts/updateLibraryIndex.ts",
+    "content:index:dry": "npm run build && tsx scripts/updateLibraryIndex.ts -- --dry-run"
   },
   "engines": {
     "node": ">=18"

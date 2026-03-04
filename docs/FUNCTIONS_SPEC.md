@@ -509,6 +509,8 @@ type GenerateJudgeRulesRequest = {
   weightScale?: "1-3" | "1-5" | "1-10";
   includeFormatRules?: boolean;
   mode: "strong";
+  /** When true, write a report to reports/generate-judge-rules/ (e.g. for the given skill/call). */
+  report?: boolean;
 };
 ```
 
@@ -562,6 +564,8 @@ type NormalizeJudgeRulesRequest = {
   maxRuleLength?: number;
   minRules?: number;
   maxRules?: number;
+  /** When true, write a report to reports/normalize-judge-rules/ (e.g. dropped/modified summary). */
+  report?: boolean;
 };
 ```
 
@@ -674,6 +678,8 @@ type GenerateInstructionsRequest = {
   targetAverageThreshold: number;
   loop: { maxCycles: number; forceContinueAfterPass?: boolean; patienceCycles?: number; minDeltaToCount?: number };
   optimizer: { mode: "strong" };
+  /** When true, write a report to reports/generate-instructions/ (e.g. per-skill history and best/final). */
+  report?: boolean;
 };
 ```
 
@@ -717,6 +723,8 @@ type OptimizeInstructionsRequest = {
   includeFormatRules?: boolean;
   strictness?: "balanced"|"strict";
   mode: "strong";
+  /** When true, write a report to reports/optimize/ (or reports/optimize-instructions/). */
+  report?: boolean;
 };
 ```
 
@@ -803,22 +811,24 @@ For judge/compare/race-models/generate-instructions:
 
 # Implementation status summary
 
-| Function | Status |
-|----------|--------|
-| ai.ask | Implemented |
-| ai.parseJsonResponse | Implemented (deterministic + optional LLM fallback) |
-| ai.askJson | Implemented |
-| recordsMapper.collectionMapping.v1 | Spec only |
-| ai.judge.v1 | Spec only |
-| ai.compare.v1 | Spec only |
-| ai.fix-instructions.v1 | Spec only |
-| ai.generate-rule.v1 | Spec only |
-| ai.generate-judge-rules.v1 | Spec only |
-| ai.normalize-judge-rules.v1 | Spec only |
-| ai.aggregate-judge-feedback.v1 | Spec only |
-| ai.race-models.v1 | Spec only |
-| ai.generate-instructions.v1 | Spec only |
-| ai.optimize-instructions.v1 | Spec only |
-| extractTopics, extractEntities, matchLists, summarize, classify, sentiment, translate, rank, cluster | Implemented (listed skills) |
+**Type:** *Generic* = single LLM call, uses core executor. *Orchestration* = calls other skills, no direct LLM. *Deterministic* = no LLM.
 
-Spec-only functions can be added as **content-based skills** (instructions + rules in git) and run via `run(skillName, request, { resolver })` once content exists, or implemented as built-in/orchestrators later.
+| Function | Type | Status |
+|----------|------|--------|
+| ai.ask | Generic | Implemented |
+| ai.parseJsonResponse | Deterministic (+ optional LLM fallback) | Implemented |
+| ai.askJson | Generic | Implemented |
+| recordsMapper.collectionMapping.v1 | Generic | Spec only |
+| ai.judge.v1 | Generic | Spec only |
+| ai.compare.v1 | Orchestration | Spec only |
+| ai.fix-instructions.v1 | Generic | Spec only |
+| ai.generate-rule.v1 | Generic | Spec only |
+| ai.generate-judge-rules.v1 | Generic | Spec only |
+| ai.normalize-judge-rules.v1 | Deterministic | Spec only |
+| ai.aggregate-judge-feedback.v1 | Deterministic | Spec only |
+| ai.race-models.v1 | Orchestration | Spec only |
+| ai.generate-instructions.v1 | Orchestration | Spec only |
+| ai.optimize-instructions.v1 | Generic | Spec only |
+| extractTopics, extractEntities, matchLists, summarize, classify, sentiment, translate, rank, cluster | Generic | Implemented (listed skills) |
+
+Spec-only functions can be added as **content-based skills** (instructions + rules in git) and run via `run(skillName, request, { resolver })` once content exists, or implemented as built-in/orchestrators later. Use **optimize-instructions** (bootstrap) and **generate-instructions** (iterative) to improve instructions and rules for all of them.

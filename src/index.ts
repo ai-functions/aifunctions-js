@@ -49,6 +49,28 @@ export { DEFAULT_SKILLS_REPO_URL, DEFAULT_SKILLS_BRANCH } from "./content/skills
 export { pushSkillsContent } from "./content/publishSkills.js";
 export type { PushSkillsContentOptions } from "./content/publishSkills.js";
 
+export {
+  getLibraryIndex,
+  updateLibraryIndex,
+  validateLibraryIndex,
+  validateSkillIndexEntry,
+} from "./content/libraryIndex.js";
+export type {
+  AggregateIndex,
+  GetLibraryIndexOptions,
+  IndexMeta,
+  RestrictedJsonSchemaObject,
+  SkillIndexEntry,
+  SkillIO,
+  SkillRuntime,
+  SkillSource,
+  SourceFile,
+  SourceFileKind,
+  UpdateLibraryIndexOptions,
+  UpdateLibraryIndexReport,
+  ValidationResult,
+} from "./content/libraryIndex.js";
+
 export function createClient(config: CreateClientOptions): Client {
   switch (config.backend) {
     case "openrouter":
