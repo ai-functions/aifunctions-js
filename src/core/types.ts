@@ -16,6 +16,22 @@ export type Client = {
   testConnection(): Promise<boolean>;
 };
 
+/**
+ * Attribution metadata attached to an LLM request.
+ * functionId is always present (auto-injected by the server layer).
+ * projectId, traceId, and tags are optional and provided by the caller at runtime.
+ */
+export type AttributionContext = {
+  /** Auto-injected: identifies which package function originated this call (e.g. "extract.requirements"). */
+  functionId: string;
+  /** Optional: logical project or tenant identifier (e.g. "cognni-prod"). */
+  projectId?: string;
+  /** Optional: request correlation ID. Auto-generated UUID when not provided by caller. */
+  traceId?: string;
+  /** Optional: flexible key-value metadata for grouping/filtering in analytics. */
+  tags?: Record<string, string>;
+};
+
 export type AskOptions = {
   maxTokens: number;
   temperature: number;
@@ -29,6 +45,8 @@ export type AskOptions = {
   system?: string;
   /** Request timeout in ms; default 60_000 */
   timeoutMs?: number;
+  /** Attribution metadata injected by the server layer. Skill functions do not set this directly. */
+  attribution?: AttributionContext;
 };
 
 export type AskResult = {

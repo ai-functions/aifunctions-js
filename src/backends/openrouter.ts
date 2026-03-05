@@ -22,12 +22,16 @@ type OpenRouterRequestBody = {
   max_completion_tokens: number;
   stream?: boolean;
   provider?: { order: string[]; allow_fallbacks: boolean };
+  /** Attribution tag: "<projectId>:<functionId>" or "<functionId>". Visible in OpenRouter analytics. */
+  user?: string;
 };
 
 type OpenRouterUsage = {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  /** Cost of this call in USD, returned by OpenRouter for usage accounting. */
+  cost?: number;
   [k: string]: unknown;
 };
 
@@ -142,6 +146,12 @@ export function createOpenRouterClient(
         body.provider = { order, allow_fallbacks: allowFallbacksDefault };
       }
 
+      if (opts.attribution) {
+        body.user = opts.attribution.projectId
+          ? `${opts.attribution.projectId}:${opts.attribution.functionId}`
+          : opts.attribution.functionId;
+      }
+
       const url = `${baseUrl}/chat/completions`;
       const headersValue: Record<string, string> = {
         "Content-Type": "application/json",
@@ -225,6 +235,11 @@ export function createOpenRouterClient(
       if (opts.vendor !== undefined) {
         const order = Array.isArray(opts.vendor) ? opts.vendor : [opts.vendor];
         body.provider = { order, allow_fallbacks: allowFallbacksDefault };
+      }
+      if (opts.attribution) {
+        body.user = opts.attribution.projectId
+          ? `${opts.attribution.projectId}:${opts.attribution.functionId}`
+          : opts.attribution.functionId;
       }
       const url = `${baseUrl}/chat/completions`;
       const headersValue: Record<string, string> = {

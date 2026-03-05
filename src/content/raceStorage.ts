@@ -28,7 +28,8 @@ export type RaceAttempt = {
   passRate?: number;
   avgLostPoints?: number;
   latencyMs?: number;
-  costSnapshot?: unknown;
+  /** Estimated cost in USD for this attempt. Populated from OpenRouter usage.cost or static pricing table. */
+  costSnapshot?: number | null;
 };
 
 export type RaceRecord = {

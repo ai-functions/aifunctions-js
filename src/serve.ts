@@ -47,6 +47,10 @@ import { runLayoutLint } from "./content/lintContentLayout.js";
 import { validateFunction } from "./content/validateFunction.js";
 import { requireAuth } from "./serve/auth.js";
 import { wrapWithUsageTracking, toUsageResponse } from "./serve/usageTracker.js";
+import { extractAttribution } from "./serve/attribution.js";
+import { getModelOverrides } from "./env.js";
+import { getModePreset } from "./core/modePreset.js";
+import { lookupCost } from "./serve/pricingTable.js";
 import {
   createJob,
   getJob,
@@ -55,6 +59,14 @@ import {
   getJobLogs,
   listJobs,
 } from "./serve/jobs.js";
+import {
+  fetchOpenRouterCredits,
+  fetchOpenRouterGenerations,
+} from "./serve/analyticsOpenRouter.js";
+import {
+  fetchOpenAIUsage,
+  fetchOpenAICosts,
+} from "./serve/analyticsOpenAI.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -113,12 +125,15 @@ function extractByokKey(req: import("node:http").IncomingMessage): string | unde
 }
 
 /** Always returns a usage-tracked client. Uses BYOK key when provided, otherwise falls back to server env key. */
-function makeTrackedClient(req: import("node:http").IncomingMessage) {
+function makeTrackedClient(
+  req: import("node:http").IncomingMessage,
+  attribution?: import("./core/types.js").AttributionContext
+) {
   const byokKey = extractByokKey(req);
   const base = byokKey
     ? createClient({ backend: "openrouter", openrouter: { apiKey: byokKey } })
     : createClient({ backend: "openrouter" });
-  return wrapWithUsageTracking(base);
+  return wrapWithUsageTracking(base, attribution);
 }
 
 /** Serialize any input value to a string suitable for use as inputMd. */
@@ -183,7 +198,8 @@ async function handleRun(
     process.env.VALIDATE_SKILL_OUTPUT === "1" ||
     process.env.VALIDATE_SKILL_OUTPUT === "true";
 
-  const tracker = req ? makeTrackedClient(req) : null;
+  const attribution = req ? extractAttribution(body, skill.trim()) : undefined;
+  const tracker = req ? makeTrackedClient(req, attribution) : null;
   const client = tracker?.client;
 
   try {
@@ -414,7 +430,7 @@ async function handleOptimizeJudge(
   if (typeof b?.response !== "string" || !b.response.trim()) {
     sendError(res, 400, "response is required", "INVALID_INPUT"); return;
   }
-  const tracker = makeTrackedClient(req);
+  const tracker = makeTrackedClient(req, extractAttribution(body, "optimize.judge"));
   try {
     const result = await concurrencyGuard(() =>
       judge({
@@ -466,7 +482,7 @@ async function handleOptimizeRules(
     return;
   }
 
-  const tracker = makeTrackedClient(req);
+  const tracker = makeTrackedClient(req, extractAttribution(body, "optimize.rules"));
   try {
     const result = await concurrencyGuard(() =>
       generateJudgeRules({
@@ -513,7 +529,7 @@ async function handleOptimizeRulesOptimize(
     label: (e.label === "good" || e.label === "bad" ? e.label : "good") as "good" | "bad",
     rationale: e.rationale ?? "",
   }));
-  const tracker = makeTrackedClient(req);
+  const tracker = makeTrackedClient(req, extractAttribution(body, "optimize.rules-optimize"));
   try {
     const result = await concurrencyGuard(() =>
       optimizeJudgeRules({
@@ -547,7 +563,7 @@ async function handleOptimizeFix(
   if (!b?.judgeFeedback || typeof b.judgeFeedback !== "object") {
     sendError(res, 400, "judgeFeedback is required", "INVALID_INPUT"); return;
   }
-  const tracker = makeTrackedClient(req);
+  const tracker = makeTrackedClient(req, extractAttribution(body, "optimize.fix"));
   try {
     const result = await concurrencyGuard(() =>
       fixInstructions({ instructions: b.instructions!, judgeFeedback: b.judgeFeedback!, model: b.model, client: tracker.client })
@@ -579,7 +595,7 @@ async function handleOptimizeCompare(
   if (!Array.isArray(b?.responses) || b.responses.length < 2) {
     sendError(res, 400, "responses must be an array of at least 2 items", "INVALID_INPUT"); return;
   }
-  const tracker = makeTrackedClient(req);
+  const tracker = makeTrackedClient(req, extractAttribution(body, "optimize.compare"));
   try {
     const result = await concurrencyGuard(() =>
       compare({ instructions: b.instructions!, responses: b.responses!, rules: b.rules, threshold: b.threshold ?? 0.8, mode: b.mode, model: b.model, client: tracker.client })
@@ -636,7 +652,9 @@ async function handleOptimizeGenerate(
   } else if (b?.targetModel && typeof b.targetModel === "object") {
     targetModel = { model: b.targetModel.model, class: b.targetModel.class ?? "normal" };
   } else {
-    targetModel = { model: "openai/gpt-4o-mini", class: "normal" };
+    const envOverrides = getModelOverrides();
+    const normalModel = envOverrides.normal ?? getModePreset("normal").model;
+    targetModel = { model: normalModel!, class: "normal" };
   }
 
   // Normalise thresholds and loop
@@ -645,7 +663,7 @@ async function handleOptimizeGenerate(
   const loop = b?.loop ?? { maxCycles: b?.maxCycles ?? 5 };
   const judgeRules = b?.judgeRules ?? b?.rules;
 
-  const tracker = makeTrackedClient(req);
+  const tracker = makeTrackedClient(req, extractAttribution(body, "optimize.generate"));
   const { id } = createJob("generate-instructions", { preview: seedInstructions.slice(0, 80) } as never);
   updateJob(id, { status: "running" });
   sendOk(res, { jobId: id, status: "running" });
@@ -757,15 +775,27 @@ async function handleRaceModels(res: import("node:http").ServerResponse, body: u
         const attempts = details.map((d) => {
           const n = d.perTest?.length ?? 0;
           const perTest = d.perTest as Array<{ judge: { scoreNormalized: number; lostPoints: number; pass?: boolean } }>;
+          const candidate = request.models?.find((m: { id: string }) => m.id === d.modelId) as { id: string; model: string; options?: { maxTokens?: number; temperature?: number } } | undefined;
+          // costSnapshot: use pricing rate proxy (1000 prompt + 500 completion) as relative cost indicator.
+          // Actual per-model tokens are not tracked at the race level; this is a ranking proxy only.
+          const costSnapshot = candidate ? lookupCost(candidate.model, 1000, 500) : null;
           return {
             modelId: d.modelId,
             avgScoreNormalized: n > 0 ? perTest.reduce((s, t) => s + t.judge.scoreNormalized, 0) / n : 0,
             passRate: n > 0 ? perTest.filter((t) => t.judge.pass).length / n : 0,
             avgLostPoints: n > 0 ? perTest.reduce((s, t) => s + t.judge.lostPoints, 0) / n : 0,
+            costSnapshot,
           };
         });
         const bestModelId = (result as { bestModelId: string }).bestModelId;
         const bestCandidate = request.models?.find((m: { id: string }) => m.id === bestModelId) as { id: string; model: string; options?: { maxTokens?: number; temperature?: number } } | undefined;
+        // cheapest: attempt with the lowest costSnapshot (proxy for price per token); fallback to best.
+        const attemptsWithCost = attempts.filter((a) => a.costSnapshot != null);
+        const cheapestAttempt = attemptsWithCost.length > 0
+          ? attemptsWithCost.reduce((min, a) => (a.costSnapshot! < min.costSnapshot! ? a : min))
+          : null;
+        const cheapestModelId = cheapestAttempt?.modelId ?? bestModelId;
+        const cheapestCandidate = request.models?.find((m: { id: string }) => m.id === cheapestModelId) as { id: string; model: string; options?: { maxTokens?: number; temperature?: number } } | undefined;
         const raceId = `${new Date().toISOString().replace(/[:.]/g, "-")}#${id}`;
         const record: RaceRecord = {
           raceId,
@@ -775,18 +805,21 @@ async function handleRaceModels(res: import("node:http").ServerResponse, body: u
           applyDefaults,
           candidates: { models: request.models },
           attempts: attempts as RaceRecord["attempts"],
-          winners: { best: bestModelId, cheapest: bestModelId, fastest: bestModelId, balanced: bestModelId },
+          winners: { best: bestModelId, cheapest: cheapestModelId, fastest: bestModelId, balanced: bestModelId },
           runAt: new Date().toISOString(),
           summary: (result as { summary?: string }).summary,
         };
         await appendRace(resolver, functionKey, record);
         if (applyDefaults && bestCandidate) {
-          const profile: RaceProfile = {
+          const bestProfile: RaceProfile = {
             model: bestCandidate.model,
             temperature: bestCandidate.options?.temperature,
             maxTokens: bestCandidate.options?.maxTokens,
           };
-          await setProfiles(resolver, functionKey, { best: profile, cheapest: profile, fastest: profile, balanced: profile });
+          const cheapestProfile: RaceProfile = cheapestCandidate
+            ? { model: cheapestCandidate.model, temperature: cheapestCandidate.options?.temperature, maxTokens: cheapestCandidate.options?.maxTokens }
+            : bestProfile;
+          await setProfiles(resolver, functionKey, { best: bestProfile, cheapest: cheapestProfile, fastest: bestProfile, balanced: bestProfile });
         }
         if (applyDefaults && raceType === "temperature" && b.temperatures?.length === 1) {
           const defaultMaxTokens = bestCandidate?.options?.maxTokens ?? 2048;
@@ -947,7 +980,7 @@ async function handleValidateFunction(
   req: import("node:http").IncomingMessage
 ): Promise<void> {
   const resolver = getSkillsResolver();
-  const tracker = makeTrackedClient(req);
+  const tracker = makeTrackedClient(req, extractAttribution(undefined, `functions.validate:${name}`));
   try {
     const result = await concurrencyGuard(() => validateFunction(resolver, name, { client: tracker.client }));
     sendOk(res, { ...result, usage: toUsageResponse(tracker.getUsage()) });
@@ -1159,6 +1192,10 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
         "GET /functions/:id/test-cases": "Get test cases",
         "PUT /functions/:id/test-cases": "Set test cases",
         "GET /jobs": "List jobs", "GET /jobs/:id": "Job status", "GET /jobs/:id/logs": "Job logs",
+        "GET /analytics/openrouter/credits": "OpenRouter account balance and usage",
+        "GET /analytics/openrouter/generations": "OpenRouter generation records (query: dateMin, dateMax, model, userTag, limit)",
+        "GET /analytics/openai/usage": "OpenAI org usage buckets — requires OPENAI_ADMIN_KEY (query: startTime, endTime, groupBy, projectIds, models, limit)",
+        "GET /analytics/openai/costs": "OpenAI org cost buckets — requires OPENAI_ADMIN_KEY (query: startTime, endTime, groupBy, projectIds, limit)",
       },
     });
     return;
@@ -1318,6 +1355,92 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
     }
   }
 
+  // --- /analytics/* ---
+  if (segments[0] === "analytics") {
+    const provider = segments[1];
+    const resource = segments[2];
+
+    // GET /analytics/openrouter/credits
+    if (method === "GET" && provider === "openrouter" && resource === "credits") {
+      try {
+        const byokKey = extractByokKey(req);
+        const apiKey = byokKey ?? process.env.OPENROUTER_API_KEY?.trim();
+        if (!apiKey) { sendError(res, 422, "Provide x-openrouter-key header or set OPENROUTER_API_KEY", "MISSING_ENV"); return; }
+        const result = await fetchOpenRouterCredits(apiKey);
+        sendOk(res, result);
+      } catch (e) {
+        sendError(res, 502, e instanceof Error ? e.message : String(e), "ANALYTICS_ERROR");
+      }
+      return;
+    }
+
+    // GET /analytics/openrouter/generations
+    if (method === "GET" && provider === "openrouter" && resource === "generations") {
+      try {
+        const byokKey = extractByokKey(req);
+        const apiKey = byokKey ?? process.env.OPENROUTER_API_KEY?.trim();
+        if (!apiKey) { sendError(res, 422, "Provide x-openrouter-key header or set OPENROUTER_API_KEY", "MISSING_ENV"); return; }
+        const result = await fetchOpenRouterGenerations(apiKey, {
+          dateMin: query.dateMin,
+          dateMax: query.dateMax,
+          model: query.model,
+          userTag: query.userTag,
+          limit: query.limit ? Math.min(1000, Math.max(1, Number(query.limit))) : undefined,
+        });
+        sendOk(res, result);
+      } catch (e) {
+        sendError(res, 502, e instanceof Error ? e.message : String(e), "ANALYTICS_ERROR");
+      }
+      return;
+    }
+
+    // GET /analytics/openai/usage
+    if (method === "GET" && provider === "openai" && resource === "usage") {
+      try {
+        if (!query.startTime) { sendError(res, 400, "startTime (Unix timestamp) is required", "INVALID_INPUT"); return; }
+        const groupBy = query.groupBy ? query.groupBy.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+        const projectIds = query.projectIds ? query.projectIds.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+        const models = query.models ? query.models.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+        const result = await fetchOpenAIUsage({
+          startTime: Number(query.startTime),
+          endTime: query.endTime ? Number(query.endTime) : undefined,
+          groupBy,
+          projectIds,
+          models,
+          limit: query.limit ? Math.min(1000, Math.max(1, Number(query.limit))) : undefined,
+        });
+        sendOk(res, result);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("OPENAI_ADMIN_KEY")) { sendError(res, 422, msg, "MISSING_ENV"); return; }
+        sendError(res, 502, msg, "ANALYTICS_ERROR");
+      }
+      return;
+    }
+
+    // GET /analytics/openai/costs
+    if (method === "GET" && provider === "openai" && resource === "costs") {
+      try {
+        if (!query.startTime) { sendError(res, 400, "startTime (Unix timestamp) is required", "INVALID_INPUT"); return; }
+        const groupBy = query.groupBy ? query.groupBy.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+        const projectIds = query.projectIds ? query.projectIds.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+        const result = await fetchOpenAICosts({
+          startTime: Number(query.startTime),
+          endTime: query.endTime ? Number(query.endTime) : undefined,
+          groupBy,
+          projectIds,
+          limit: query.limit ? Math.min(1000, Math.max(1, Number(query.limit))) : undefined,
+        });
+        sendOk(res, result);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("OPENAI_ADMIN_KEY")) { sendError(res, 422, msg, "MISSING_ENV"); return; }
+        sendError(res, 502, msg, "ANALYTICS_ERROR");
+      }
+      return;
+    }
+  }
+
   sendError(res, 404, "Not found", "NOT_FOUND");
 }
 
@@ -1337,4 +1460,6 @@ server.listen(PORT, () => {
   console.log("  GET /functions/:id/{versions,test-cases}, PUT /functions/:id/test-cases");
   console.log("  POST /race/models, POST /content/{sync,index,fixtures,layout-lint}");
   console.log("  GET /jobs, GET /jobs/:id, GET /jobs/:id/logs");
+  console.log("  GET /analytics/openrouter/{credits,generations}");
+  console.log("  GET /analytics/openai/{usage,costs}  (requires OPENAI_ADMIN_KEY)");
 });

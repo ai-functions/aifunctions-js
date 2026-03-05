@@ -85,7 +85,11 @@ skills/<skillId>/ultra     # optional highest-tier instructions
 skills/<skillId>/rules     # optional judge rules (JSON)
 skills/<skillId>/meta.json # status: draft | released, version, scoreGate
 skills/<skillId>/test-cases.json  # stored test cases for validate/optimize
+skills/<skillId>/race-config.json # race defaults + winner profiles (best/cheapest/fastest/balanced)
+skills/<skillId>/races.json       # race history (append-only, capped)
 ```
+
+**Docs:** [COLLECTIONS_MAPPING.md](docs/COLLECTIONS_MAPPING.md) describes what collections exist, their schema, and relationships (prerequisite). [DATA_MAPPING.md](docs/DATA_MAPPING.md) describes the actual records and data in each.
 
 Prompts are:
 - reviewable in PRs
@@ -321,6 +325,8 @@ GET  /functions/:id/race-report  race history — query: last, since, raceId →
 
 Job result for a race includes `ranked`, `raw`, `winners`, `usage`. Run with `mode: best|cheapest|fastest|balanced` uses the stored profile for that function.
 
+The `cheapest` winner is selected by pricing rate using the bundled pricing table (see below).
+
 ### Optimization endpoints
 
 ```
@@ -352,6 +358,95 @@ POST /content/fixtures
 POST /content/layout-lint
 ```
 
+### Cost estimation
+
+All responses include `usage.estimatedCost` (USD) when cost can be determined:
+
+- **OpenRouter:** uses the `cost` field returned directly in the response (exact, no math required).
+- **OpenAI models via static table:** falls back to `data/openai-cost.json`, a bundled pricing table accurate as of **March 5th 2026**. Prices may change over time. A future version will source pricing from a live API so the table stays current automatically.
+- **Other models:** cost is omitted when neither source applies.
+
+---
+
+### Function-level cost & activity tracking
+
+Every LLM call is automatically tagged with the **function that originated it**, so usage data can be attributed precisely — not just at the model or account level.
+
+**How it works:**
+
+1. The server injects `functionId` automatically (e.g. `extract.requirements`, `optimize.judge`).
+2. Callers may optionally pass `projectId`, `traceId`, and `tags` in any POST body.
+3. The server embeds these as metadata in the outgoing provider request (`user` field for OpenRouter).
+4. Every response returns extended attribution fields in the `usage` object.
+
+**Optional request fields (any POST endpoint that calls an LLM):**
+
+| Field | Type | Description |
+|---|---|---|
+| `projectId` | `string` | Logical project or tenant (e.g. `"cognni-prod"`) |
+| `traceId` | `string` | Correlation ID for distributed tracing. Auto-generated UUID if omitted. |
+| `tags` | `object` | Free-form key-value metadata (string values) |
+
+**Example request:**
+
+```json
+POST /functions/extract.requirements/run
+{
+  "input": { "text": "..." },
+  "projectId": "cognni-prod",
+  "traceId": "req-983741",
+  "tags": { "workflow": "classification", "environment": "production" }
+}
+```
+
+**Extended `usage` response:**
+
+```json
+{
+  "promptTokens": 240,
+  "completionTokens": 82,
+  "totalTokens": 322,
+  "model": "openai/gpt-5-nano",
+  "latencyMs": 1430,
+  "estimatedCost": 0.000147,
+  "functionId": "extract.requirements",
+  "projectId": "cognni-prod",
+  "traceId": "req-983741",
+  "tags": { "workflow": "classification", "environment": "production" }
+}
+```
+
+`functionId` is always present. `projectId`, `traceId`, and `tags` appear only when provided.
+
+The package itself remains **stateless** — it does not store usage history. The `usage` object is returned to the caller for forwarding to any external logging pipeline, analytics service, or dashboard.
+
+---
+
+### Analytics APIs
+
+Proxy endpoints that fetch usage and cost data directly from the upstream provider. No data is stored by this server.
+
+```
+GET /analytics/openrouter/credits      account balance and total usage
+GET /analytics/openrouter/generations  generation records (query: dateMin, dateMax, model, userTag, limit)
+GET /analytics/openai/usage            org usage buckets — requires OPENAI_ADMIN_KEY (query: startTime, endTime, groupBy, projectIds, models, limit)
+GET /analytics/openai/costs            org cost buckets  — requires OPENAI_ADMIN_KEY (query: startTime, endTime, groupBy, projectIds, limit)
+```
+
+**OpenRouter:** uses `x-openrouter-key` header (BYOK) or `OPENROUTER_API_KEY` env.
+
+**OpenAI:** requires `OPENAI_ADMIN_KEY` env var (an admin-scoped key from your OpenAI org settings). Standard project keys do not have access to organization-level analytics.
+
+**Filter generations by function or project:**
+
+```
+GET /analytics/openrouter/generations?userTag=cognni-prod:extract.requirements&dateMin=2026-03-01
+```
+
+The `userTag` filter matches the attribution tag this package injects into the OpenRouter `user` field, so you can pull all generations for a specific function or `project:function` pair.
+
+---
+
 ### Server env vars
 
 | Var | Default | Description |
@@ -363,6 +458,7 @@ POST /content/layout-lint
 | `JOB_TTL` | `3600` | Seconds before completed jobs are cleaned up |
 | `VALIDATE_SKILL_OUTPUT` | `0` | If `1`, all runs include schema validation |
 | `SKILLS_LOCAL_PATH` | — | Local git path, required for `:push` endpoint |
+| `OPENAI_ADMIN_KEY` | — | Admin-scoped OpenAI key, required for `GET /analytics/openai/*` |
 
 ---
 

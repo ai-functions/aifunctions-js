@@ -12,7 +12,18 @@ export type {
   StreamChunk,
   CreateClientOptions,
   LlmMode,
+  AttributionContext,
 } from "./core/types.js";
+export { extractAttribution } from "./serve/attribution.js";
+export {
+  wrapWithUsageTracking,
+  toUsageResponse,
+} from "./serve/usageTracker.js";
+export type {
+  TrackedUsage,
+  UsageTracker,
+  UsageResponse,
+} from "./serve/usageTracker.js";
 export { getModePreset, resolveOptionsFromMode } from "./core/modePreset.js";
 export type { ModePreset, ResolvedAskOptions } from "./core/modePreset.js";
 export { NxAiApiError } from "./core/errors.js";

@@ -91,6 +91,41 @@ describe("OpenRouter request body mapping", () => {
     assert.strictEqual(messages?.[1]?.role, "user");
     assert.strictEqual(messages?.[1]?.content, "Hi");
   });
+
+  it("sends user field as projectId:functionId when attribution has projectId", async () => {
+    const ai = createClient({
+      backend: "openrouter",
+      openrouter: { apiKey: "test-key" },
+    });
+    await ai.ask("Hi", {
+      model: "openai/gpt-4o",
+      maxTokens: 100,
+      temperature: 0.7,
+      attribution: {
+        functionId: "extract.requirements",
+        projectId: "cognni-prod",
+        traceId: "req-1",
+      },
+    });
+    assert.strictEqual(lastBody.user, "cognni-prod:extract.requirements");
+  });
+
+  it("sends user field as functionId only when attribution has no projectId", async () => {
+    const ai = createClient({
+      backend: "openrouter",
+      openrouter: { apiKey: "test-key" },
+    });
+    await ai.ask("Hi", {
+      model: "openai/gpt-4o",
+      maxTokens: 100,
+      temperature: 0.7,
+      attribution: {
+        functionId: "optimize.judge",
+        traceId: "t2",
+      },
+    });
+    assert.strictEqual(lastBody.user, "optimize.judge");
+  });
 });
 
 describe("OpenRouter error mapping", () => {
