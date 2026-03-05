@@ -6,3 +6,6 @@ dist/
 .DS_Store
 *.tsbuildinfo
 .content/
+# Local only — not for the repo; use a separate shared folder if you need to publish any of this
+reports/
+docs/

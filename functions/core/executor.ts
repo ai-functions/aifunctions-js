@@ -19,6 +19,8 @@ export async function executeSkill<T>(config: ExecuteSkillConfig<T>): Promise<T>
         client,
         mode = "normal",
         model,
+        temperature,
+        maxTokens,
     } = config;
     const prompt = buildPrompt(request);
     const result = await callAI<T>({
@@ -27,6 +29,8 @@ export async function executeSkill<T>(config: ExecuteSkillConfig<T>): Promise<T>
         instructions,
         prompt,
         model,
+        temperature,
+        maxTokens,
         rules,
     });
     return result.data;
@@ -39,7 +43,7 @@ export async function executeSkill<T>(config: ExecuteSkillConfig<T>): Promise<T>
 export async function* executeSkillStream(
     config: ExecuteSkillConfig
 ): AsyncGenerator<StreamChunk> {
-    const { request, buildPrompt, instructions, rules, client, mode = "normal", model } = config;
+    const { request, buildPrompt, instructions, rules, client, mode = "normal", model, temperature, maxTokens } = config;
     const prompt = buildPrompt(request);
     yield* callAIStream({
         client,
@@ -47,6 +51,8 @@ export async function* executeSkillStream(
         instructions,
         prompt,
         model,
+        temperature,
+        maxTokens,
         rules,
     });
 }

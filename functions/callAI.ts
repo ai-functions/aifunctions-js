@@ -24,6 +24,8 @@ export interface CallAIParams {
     };
     prompt: string;
     model?: string;
+    temperature?: number;
+    maxTokens?: number;
     /** Optional rules to append to the system instruction (e.g. from content). Used automatically when run() has a resolver. */
     rules?: CallAIRule[];
 }
@@ -56,6 +58,8 @@ export async function callAI<T>(params: CallAIParams): Promise<CallAIResult<T>> 
         instructions,
         prompt,
         model: modelOverride,
+        temperature: temperatureOverride,
+        maxTokens: maxTokensOverride,
         rules,
     } = params;
 
@@ -63,6 +67,8 @@ export async function callAI<T>(params: CallAIParams): Promise<CallAIResult<T>> 
     const client = providedClient || createClient({ backend: preset.backend });
     const model =
         modelOverride ?? (preset.backend === "openrouter" ? preset.model : undefined);
+    const temperature = temperatureOverride ?? preset.temperature;
+    const maxTokens = maxTokensOverride ?? preset.maxTokens;
     let instruction =
         mode === "weak"
             ? instructions.weak
@@ -74,8 +80,8 @@ export async function callAI<T>(params: CallAIParams): Promise<CallAIResult<T>> 
     const res = await client.ask(prompt, {
         system: instruction,
         model,
-        maxTokens: preset.maxTokens,
-        temperature: preset.temperature,
+        maxTokens,
+        temperature,
     });
 
     let text = res.text.trim();
@@ -114,6 +120,8 @@ export async function* callAIStream(params: CallAIParams): AsyncGenerator<Stream
         instructions,
         prompt,
         model: modelOverride,
+        temperature: temperatureOverride,
+        maxTokens: maxTokensOverride,
         rules,
     } = params;
 
@@ -121,6 +129,8 @@ export async function* callAIStream(params: CallAIParams): AsyncGenerator<Stream
     const client = providedClient || createClient({ backend: preset.backend });
     const model =
         modelOverride ?? (preset.backend === "openrouter" ? preset.model : undefined);
+    const temperature = temperatureOverride ?? preset.temperature;
+    const maxTokens = maxTokensOverride ?? preset.maxTokens;
     let instruction =
         mode === "weak"
             ? instructions.weak
@@ -131,8 +141,8 @@ export async function* callAIStream(params: CallAIParams): AsyncGenerator<Stream
     const opts = {
         system: instruction,
         model,
-        maxTokens: preset.maxTokens,
-        temperature: preset.temperature,
+        maxTokens,
+        temperature,
     };
 
     if (typeof client.askStream === "function") {

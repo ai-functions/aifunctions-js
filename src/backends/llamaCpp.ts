@@ -5,6 +5,7 @@ import type {
   StreamChunk,
 } from "../core/types.js";
 import { NxAiApiError } from "../core/errors.js";
+import { resolveOptionsFromMode } from "../core/modePreset.js";
 import { normalizeUsage } from "../core/usage.js";
 import { getLlamaCppEnv } from "../env.js";
 
@@ -73,6 +74,7 @@ export function createLlamaCppClient(
       const { model: m } = await ensureLoaded();
       if (!m) throw new NxAiApiError("Llama model not loaded", { code: "MISSING_OPTIONAL_DEP" });
 
+      const resolved = opts.mode ? resolveOptionsFromMode(opts) : opts;
       const prompt = buildPrompt(opts.system, instruction);
       const inputTokens = m.tokenize(prompt);
       const promptTokenCount = inputTokens.length;
@@ -84,8 +86,8 @@ export function createLlamaCppClient(
       const sequence = context.getSequence();
 
       const resTokens: number[] = [];
-      const maxTokens = opts.maxTokens;
-      const options = { temperature: opts.temperature };
+      const maxTokens = resolved.maxTokens;
+      const options = { temperature: resolved.temperature };
 
       for await (const token of sequence.evaluate(inputTokens, options)) {
         resTokens.push(token);
@@ -106,6 +108,7 @@ export function createLlamaCppClient(
       const { model: m } = await ensureLoaded();
       if (!m) throw new NxAiApiError("Llama model not loaded", { code: "MISSING_OPTIONAL_DEP" });
 
+      const resolved = opts.mode ? resolveOptionsFromMode(opts) : opts;
       const prompt = buildPrompt(opts.system, instruction);
       const inputTokens = m.tokenize(prompt);
       const promptTokenCount = inputTokens.length;
@@ -117,8 +120,8 @@ export function createLlamaCppClient(
       const sequence = context.getSequence();
 
       const resTokens: number[] = [];
-      const maxTokens = opts.maxTokens;
-      const options = { temperature: opts.temperature };
+      const maxTokens = resolved.maxTokens;
+      const options = { temperature: resolved.temperature };
 
       for await (const token of sequence.evaluate(inputTokens, options)) {
         resTokens.push(token);

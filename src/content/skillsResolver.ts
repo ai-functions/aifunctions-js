@@ -253,6 +253,97 @@ export async function resolveSkillRules(
   }
 }
 
+// --- Test cases ---
+
+export type SkillTestCase = {
+  id: string;
+  inputMd: string;
+  expectedOutputMd?: string;
+};
+
+export function skillTestCasesKey(skillName: string): string {
+  const segment = normalizeKeySegment(skillName);
+  return `skills/${segment}/test-cases.json`;
+}
+
+export async function getSkillTestCases(
+  resolver: ContentResolver,
+  skillName: string
+): Promise<SkillTestCase[]> {
+  const key = skillTestCasesKey(skillName);
+  try {
+    const raw = await resolver.get(key);
+    const parsed = JSON.parse(typeof raw === "string" ? raw : "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (x): x is SkillTestCase =>
+        typeof x === "object" &&
+        x !== null &&
+        typeof (x as { id?: unknown }).id === "string" &&
+        typeof (x as { inputMd?: unknown }).inputMd === "string"
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function setSkillTestCases(
+  resolver: ContentResolver,
+  skillName: string,
+  testCases: SkillTestCase[]
+): Promise<void> {
+  const key = skillTestCasesKey(skillName);
+  await resolver.set(key, JSON.stringify(testCases, null, 2));
+}
+
+// --- Function metadata ---
+
+export type FunctionStatus = "draft" | "released";
+
+export type FunctionMeta = {
+  status: FunctionStatus;
+  version: string | null;
+  releasedAt: string | null;
+  lastValidation: { score: number; passed: boolean; runAt: string } | null;
+  scoreGate: number;
+};
+
+export function functionMetaKey(skillName: string): string {
+  const segment = normalizeKeySegment(skillName);
+  return `skills/${segment}/meta.json`;
+}
+
+const DEFAULT_META: FunctionMeta = {
+  status: "draft",
+  version: null,
+  releasedAt: null,
+  lastValidation: null,
+  scoreGate: 0.85,
+};
+
+export async function getFunctionMeta(
+  resolver: ContentResolver,
+  skillName: string
+): Promise<FunctionMeta> {
+  const key = functionMetaKey(skillName);
+  try {
+    const raw = await resolver.get(key);
+    const parsed = JSON.parse(typeof raw === "string" ? raw : "{}") as Partial<FunctionMeta>;
+    return { ...DEFAULT_META, ...parsed };
+  } catch {
+    return { ...DEFAULT_META };
+  }
+}
+
+export async function setFunctionMeta(
+  resolver: ContentResolver,
+  skillName: string,
+  meta: FunctionMeta
+): Promise<void> {
+  const key = functionMetaKey(skillName);
+  await resolver.set(key, JSON.stringify(meta, null, 2));
+}
+
 /** Version entry from nx-content getVersions (git log). */
 export type SkillVersionEntry = {
   sha: string;

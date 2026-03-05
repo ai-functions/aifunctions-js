@@ -108,6 +108,8 @@ export {
   generateJudgeRulesV1,
   optimizeInstructions,
   optimizeInstructionsV1,
+  optimizeJudgeRules,
+  optimizeJudgeRulesV1,
 } from "./judge/index.js";
 export type {
   NormalizeJudgeRulesRequest,
@@ -123,6 +125,8 @@ export type {
   GenerateJudgeRulesOutput,
   OptimizeInstructionsRequest,
   OptimizeInstructionsOutput,
+  OptimizeJudgeRulesRequest,
+  OptimizeJudgeRulesOutput,
 } from "./judge/index.js";
 
 export {

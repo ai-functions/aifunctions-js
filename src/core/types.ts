@@ -19,8 +19,10 @@ export type Client = {
 export type AskOptions = {
   maxTokens: number;
   temperature: number;
-  /** OpenRouter only: e.g. "openai/gpt-4o" or any OpenRouter model slug */
+  /** OpenRouter only: e.g. "openai/gpt-4o" or any OpenRouter model slug. When mode is set, resolved from config/env/preset if omitted. */
   model?: string;
+  /** Resolve model (and optionally temperature/maxTokens) from configured presets. Explicit model/temperature/maxTokens override. */
+  mode?: LlmMode;
   /** OpenRouter only: provider routing preference */
   vendor?: string | string[];
   /** Optional system prompt */
@@ -48,6 +50,8 @@ export type Usage = {
 export type CreateClientOptions =
   | {
     backend: "openrouter";
+    /** Override which model is used for mode "normal" and "strong". Env LLM_MODEL_NORMAL / LLM_MODEL_STRONG override defaults when set. */
+    models?: { normal?: string; strong?: string };
     openrouter?: {
       apiKey?: string;
       baseUrl?: string;

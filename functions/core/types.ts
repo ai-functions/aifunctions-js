@@ -24,4 +24,8 @@ export type ExecuteSkillConfig<T = unknown> = {
     mode?: LlmMode;
     /** Optional model override. */
     model?: string;
+    /** Optional temperature override (e.g. from race profile). */
+    temperature?: number;
+    /** Optional maxTokens override (e.g. from race profile). */
+    maxTokens?: number;
 };

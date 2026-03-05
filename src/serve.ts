@@ -1,26 +1,52 @@
 /**
  * REST API server for aifunctions. Run with: npm run serve
- * Exposes skill run, optimize, race, content workflows, and jobs. No UI.
+ * Exposes skill run, optimize, race, content workflows, jobs, and functions lifecycle.
  */
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getSkillsResolver, getLibraryIndex, updateLibraryIndex } from "./index.js";
+import {
+  getSkillsResolver,
+  getLibraryIndex,
+  updateLibraryIndex,
+  createClient,
+  getSkillInstructions,
+  setSkillInstructions,
+  getSkillRules,
+  setSkillRules,
+  getSkillTestCases,
+  setSkillTestCases,
+  getFunctionMeta,
+  setFunctionMeta,
+  getSkillInstructionVersions,
+  pushSkillsContent,
+  appendRace,
+  setProfiles,
+  setDefaults,
+  getProfiles,
+  getRaceReport,
+} from "./index.js";
+import type { RaceRecord, RaceProfile } from "./content/raceStorage.js";
 import {
   run,
   getSkillNames,
   getSkillNamesAsync,
   optimizeInstruction,
   raceModels,
+  judge,
+  generateJudgeRules,
+  optimizeJudgeRules,
+  fixInstructions,
+  compare,
+  generateInstructions,
+  type JudgeRule,
 } from "../functions/index.js";
-import {
-  getSkillInstructions,
-  setSkillInstructions,
-} from "./index.js";
 import { runFixtures } from "./content/runFixtures.js";
 import { runLayoutLint } from "./content/lintContentLayout.js";
+import { validateFunction } from "./content/validateFunction.js";
 import { requireAuth } from "./serve/auth.js";
+import { wrapWithUsageTracking, toUsageResponse } from "./serve/usageTracker.js";
 import {
   createJob,
   getJob,
@@ -29,7 +55,7 @@ import {
   getJobLogs,
   listJobs,
 } from "./serve/jobs.js";
-// API contract: https://api.aifunction.dev — standard envelope, status codes, CORS https://api.aifunction.dev — standard envelope, status codes, CORS
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const PORT = Number(process.env.PORT) || 3780;
@@ -52,15 +78,9 @@ function readJsonBody(req: import("node:http").IncomingMessage): Promise<unknown
     req.on("data", (chunk) => chunks.push(chunk));
     req.on("end", () => {
       const body = Buffer.concat(chunks).toString("utf8");
-      if (!body.trim()) {
-        resolve(undefined);
-        return;
-      }
-      try {
-        resolve(JSON.parse(body));
-      } catch {
-        reject(new Error("Invalid JSON body"));
-      }
+      if (!body.trim()) { resolve(undefined); return; }
+      try { resolve(JSON.parse(body)); }
+      catch { reject(new Error("Invalid JSON body")); }
     });
     req.on("error", reject);
   });
@@ -69,7 +89,7 @@ function readJsonBody(req: import("node:http").IncomingMessage): Promise<unknown
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "Content-Type, x-api-key, x-openrouter-key",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
 };
 
 function sendOk(res: import("node:http").ServerResponse, data: unknown) {
@@ -77,21 +97,68 @@ function sendOk(res: import("node:http").ServerResponse, data: unknown) {
   res.end(JSON.stringify({ ok: true, data }));
 }
 
-function sendError(
-  res: import("node:http").ServerResponse,
-  status: number,
-  message: string,
-  code: string
-) {
+function sendError(res: import("node:http").ServerResponse, status: number, message: string, code: string) {
   res.writeHead(status, { "Content-Type": "application/json", ...CORS_HEADERS });
   res.end(JSON.stringify({ ok: false, error: { code, message } }));
 }
 
-function parsePath(pathStr: string): { segments: string[]; name?: string; id?: string } {
+function parsePath(pathStr: string): { segments: string[] } {
   const segments = pathStr.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
-  const name = segments[1]; // /skills/:name
-  const id = segments[1]; // /jobs/:id
-  return { segments, name, id };
+  return { segments };
+}
+
+function extractByokKey(req: import("node:http").IncomingMessage): string | undefined {
+  const h = req.headers["x-openrouter-key"];
+  return (Array.isArray(h) ? h[0] : h)?.trim() || undefined;
+}
+
+/** Always returns a usage-tracked client. Uses BYOK key when provided, otherwise falls back to server env key. */
+function makeTrackedClient(req: import("node:http").IncomingMessage) {
+  const byokKey = extractByokKey(req);
+  const base = byokKey
+    ? createClient({ backend: "openrouter", openrouter: { apiKey: byokKey } })
+    : createClient({ backend: "openrouter" });
+  return wrapWithUsageTracking(base);
+}
+
+/** Serialize any input value to a string suitable for use as inputMd. */
+function toInputMd(val: unknown): string {
+  if (typeof val === "string") return val;
+  return JSON.stringify(val, null, 2);
+}
+
+/** Build synthetic instructions from labeled examples for generateJudgeRules. When providing good/bad examples, include a brief rationale (why) when possible. */
+function synthesizeInstructionsFromExamples(
+  examples: Array<{ id?: string; input?: unknown; output?: unknown; label?: string; rationale?: string }>,
+  context?: string
+): string {
+  const lines: string[] = [];
+  if (context?.trim()) lines.push(`Context: ${context.trim()}\n`);
+
+  const good = examples.filter((e) => e.label === "good");
+  const bad = examples.filter((e) => e.label === "bad");
+
+  if (good.length > 0) {
+    lines.push("## CORRECT outputs (should PASS all rules)");
+    for (const ex of good) {
+      if (ex.input != null) lines.push(`Input: ${toInputMd(ex.input)}`);
+      if (ex.output != null) lines.push(`Output: ${toInputMd(ex.output)}`);
+      if (ex.rationale?.trim()) lines.push(`Why good: ${ex.rationale.trim()}`);
+      lines.push("");
+    }
+  }
+
+  if (bad.length > 0) {
+    lines.push("## INCORRECT outputs (should FAIL one or more rules)");
+    for (const ex of bad) {
+      if (ex.input != null) lines.push(`Input: ${toInputMd(ex.input)}`);
+      if (ex.output != null) lines.push(`Output: ${toInputMd(ex.output)}`);
+      if (ex.rationale?.trim()) lines.push(`Why bad: ${ex.rationale.trim()}`);
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n").trim();
 }
 
 // --- Handlers ---
@@ -99,7 +166,8 @@ function parsePath(pathStr: string): { segments: string[]; name?: string; id?: s
 async function handleRun(
   res: import("node:http").ServerResponse,
   body: unknown,
-  skillFromPath?: string
+  skillFromPath?: string,
+  req?: import("node:http").IncomingMessage
 ): Promise<void> {
   const skill = skillFromPath ?? (body as { skill?: string })?.skill;
   const rawBody = body as { input?: unknown; request?: unknown; options?: { validate?: boolean } };
@@ -114,18 +182,25 @@ async function handleRun(
     validateOption === true ||
     process.env.VALIDATE_SKILL_OUTPUT === "1" ||
     process.env.VALIDATE_SKILL_OUTPUT === "true";
+
+  const tracker = req ? makeTrackedClient(req) : null;
+  const client = tracker?.client;
+
   try {
     const out = await concurrencyGuard(() =>
-      run(skill.trim(), request ?? {}, { resolver, validateOutput })
+      run(skill.trim(), request ?? {}, { resolver, validateOutput, client })
     );
+    const usage = tracker ? toUsageResponse(tracker.getUsage()) : null;
+
     if (validateOutput && typeof out === "object" && out !== null && "validation" in out) {
       const { result, validation } = out as { result: unknown; validation: { valid: boolean; errors?: string[] } };
       sendOk(res, {
         result,
         validation: { valid: validation.valid, errors: validation.errors ?? [] },
+        usage,
       });
     } else {
-      sendOk(res, { result: out });
+      sendOk(res, { result: out, usage });
     }
   } catch (e: unknown) {
     const err = e as { code?: string; status?: number; message?: string };
@@ -150,11 +225,7 @@ async function handleSkillsList(
     const resolver = getSkillsResolver();
     const names = await getSkillNamesAsync(resolver);
     let index: Awaited<ReturnType<typeof getLibraryIndex>> | null = null;
-    try {
-      index = await getLibraryIndex({ resolver, allowMissing: true });
-    } catch {
-      // no index
-    }
+    try { index = await getLibraryIndex({ resolver, allowMissing: true }); } catch { /* no index */ }
     const byId = new Map<string, { $refKey: string; entry?: Record<string, unknown> }>();
     if (index?.skills) {
       for (const ref of index.skills) {
@@ -163,9 +234,7 @@ async function handleSkillsList(
           const raw = await resolver.get(r.$refKey);
           const entry = JSON.parse(typeof raw === "string" ? raw : "{}") as Record<string, unknown> & { id?: string };
           if (entry.id) byId.set(entry.id as string, { $refKey: r.$refKey, entry });
-        } catch {
-          // skip
-        }
+        } catch { /* skip */ }
       }
     }
     let skills = names.map((name) => {
@@ -186,10 +255,9 @@ async function handleSkillsList(
     if (query.category) skills = skills.filter((s) => s.category === query.category);
     if (query.q?.trim()) {
       const q = query.q.trim().toLowerCase();
-      skills = skills.filter(
-        (s) =>
-          s.name.toLowerCase().includes(q) ||
-          (s.description && String(s.description).toLowerCase().includes(q))
+      skills = skills.filter((s) =>
+        s.name.toLowerCase().includes(q) ||
+        (s.description && String(s.description).toLowerCase().includes(q))
       );
     }
     sendOk(res, { skills });
@@ -198,10 +266,7 @@ async function handleSkillsList(
   }
 }
 
-async function handleSkillDetail(
-  res: import("node:http").ServerResponse,
-  name: string
-): Promise<void> {
+async function handleSkillDetail(res: import("node:http").ServerResponse, name: string): Promise<void> {
   try {
     const resolver = getSkillsResolver();
     const names = await getSkillNamesAsync(resolver);
@@ -220,18 +285,10 @@ async function handleSkillDetail(
         const raw = await resolver.get(ref.$refKey);
         entry = JSON.parse(typeof raw === "string" ? raw : "{}") as Record<string, unknown>;
       }
-    } catch {
-      // no index
-    }
+    } catch { /* no index */ }
     const instructions: Record<string, string> = { weak: "Available", strong: "Available", ultra: "Not configured" };
-    if (entry && typeof entry === "object" && entry !== null) {
-      sendOk(res, {
-        ...entry,
-        name: entry.id ?? name,
-        version: (entry as { schemaVersion?: string }).schemaVersion ?? "1.0.0",
-        examples: (entry as { examples?: unknown[] }).examples ?? [],
-        instructions,
-      });
+    if (entry) {
+      sendOk(res, { ...entry, name: entry.id ?? name, version: (entry as { schemaVersion?: string }).schemaVersion ?? "1.0.0", examples: (entry as { examples?: unknown[] }).examples ?? [], instructions });
     } else {
       sendOk(res, { name, version: "1.0.0", examples: [], instructions });
     }
@@ -240,22 +297,11 @@ async function handleSkillDetail(
   }
 }
 
-async function handleOptimizeInstructions(
-  res: import("node:http").ServerResponse,
-  body: unknown
-): Promise<void> {
-  const b = body as {
-    instructions?: string;
-    skillName?: string | null;
-    mode?: "weak" | "strong";
-    examples?: unknown[];
-    model?: string;
-    maxTokens?: number;
-  };
+async function handleOptimizeInstructions(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
+  const b = body as { instructions?: string; skillName?: string | null; mode?: "weak" | "strong"; model?: string };
   let rawInstructions = b?.instructions;
   const skillName = typeof b?.skillName === "string" ? b.skillName : "unknown";
   const mode = b?.mode === "weak" ? "weak" : "normal";
-
   if (!rawInstructions && b?.skillName) {
     const resolver = getSkillsResolver();
     rawInstructions = await getSkillInstructions(resolver, b.skillName);
@@ -268,7 +314,6 @@ async function handleOptimizeInstructions(
     sendError(res, 400, "Provide instructions or skillName", "INVALID_INPUT");
     return;
   }
-
   try {
     const result = await concurrencyGuard(() =>
       optimizeInstruction(rawInstructions!, mode, skillName, { model: b?.model })
@@ -279,76 +324,38 @@ async function handleOptimizeInstructions(
     sendOk(res, {
       optimizedInstructions: result.optimized,
       diff: diff || undefined,
-      usage: {
-        promptTokens: result.usage.promptTokens,
-        completionTokens: result.usage.completionTokens,
-        totalTokens: result.usage.totalTokens,
-        estimatedCost: undefined,
-      },
+      usage: { promptTokens: result.usage.promptTokens, completionTokens: result.usage.completionTokens, totalTokens: result.usage.totalTokens },
     });
   } catch (e: unknown) {
     const err = e as { code?: string; status?: number; message?: string };
-    if (err.code === "QUEUE_FULL" && err.status === 503) {
-      sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL");
-      return;
-    }
-    sendError(res, 500, e instanceof Error ? (e as Error).message : String(e), "MISSING_OPTIONAL_DEP");
+    if (err.code === "QUEUE_FULL" && err.status === 503) { sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL"); return; }
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
   }
 }
 
-async function handleOptimizeSkill(
-  res: import("node:http").ServerResponse,
-  body: unknown
-): Promise<void> {
+async function handleOptimizeSkill(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
   const b = body as { skillName?: string; mode?: "weak" | "strong"; runValidation?: boolean };
-  const skillName = b?.skillName;
-  if (!skillName || typeof skillName !== "string") {
-    sendError(res, 400, "skillName is required", "INVALID_INPUT");
-    return;
-  }
+  if (!b?.skillName || typeof b.skillName !== "string") { sendError(res, 400, "skillName is required", "INVALID_INPUT"); return; }
   const resolver = getSkillsResolver();
   const mode = b?.mode === "weak" ? "weak" : "normal";
   try {
-    const before = await getSkillInstructions(resolver, skillName);
-    if (!before?.trim()) {
-      sendError(res, 404, `No instructions for skill: ${skillName}`, "SKILL_NOT_FOUND");
-      return;
-    }
-    const result = await concurrencyGuard(() =>
-      optimizeInstruction(before, mode, skillName)
-    );
-    await setSkillInstructions(resolver, skillName, result.optimized);
+    const before = await getSkillInstructions(resolver, b.skillName);
+    if (!before?.trim()) { sendError(res, 404, `No instructions for skill: ${b.skillName}`, "SKILL_NOT_FOUND"); return; }
+    const result = await concurrencyGuard(() => optimizeInstruction(before, mode, b.skillName!));
+    await setSkillInstructions(resolver, b.skillName, result.optimized);
     const validationSummary = b?.runValidation
-      ? await runFixtures({ resolver, skillName }).then((r) => ({ ok: r.ok, failed: r.failed }))
+      ? await runFixtures({ resolver, skillName: b.skillName }).then((r) => ({ ok: r.ok, failed: r.failed }))
       : undefined;
-    sendOk(res, {
-      before,
-      after: result.optimized,
-      validationSummary,
-      usage: result.usage,
-    });
+    sendOk(res, { before, after: result.optimized, validationSummary, usage: result.usage });
   } catch (e: unknown) {
     const err = e as { code?: string; status?: number; message?: string };
-    if (err.code === "QUEUE_FULL" && err.status === 503) {
-      sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL");
-      return;
-    }
-    sendError(res, 500, e instanceof Error ? (e as Error).message : String(e), "MISSING_OPTIONAL_DEP");
+    if (err.code === "QUEUE_FULL" && err.status === 503) { sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL"); return; }
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
   }
 }
 
-async function handleOptimizeBatch(
-  res: import("node:http").ServerResponse,
-  body: unknown
-): Promise<void> {
-  const b = body as {
-    skills?: string[];
-    prefix?: string;
-    tag?: string;
-    mode?: "weak" | "strong";
-    concurrency?: number;
-    continueOnError?: boolean;
-  };
+async function handleOptimizeBatch(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
+  const b = body as { skills?: string[]; mode?: "weak" | "strong"; continueOnError?: boolean };
   const resolver = getSkillsResolver();
   let skills: string[] = b?.skills ?? [];
   if (skills.length === 0) {
@@ -356,9 +363,9 @@ async function handleOptimizeBatch(
     skills = all.filter((n) => n !== "ai.ask");
   }
   const { id, job } = createJob("batch", { totalSkills: skills.length });
+  void job;
   updateJob(id, { status: "running" });
   sendOk(res, { jobId: id, status: "running", totalSkills: skills.length });
-
   const mode = b?.mode === "weak" ? "weak" : "normal";
   const continueOnError = b?.continueOnError === true;
   const results: Array<{ skillName: string; ok: boolean; error?: string }> = [];
@@ -369,60 +376,652 @@ async function handleOptimizeBatch(
         updateJob(id, { progress: (i + 1) / skills.length, currentStep: `Optimizing ${skillName}` });
         try {
           const before = await getSkillInstructions(resolver, skillName);
-          if (!before?.trim()) {
-            results.push({ skillName, ok: false, error: "No instructions" });
-            if (!continueOnError) break;
-            continue;
-          }
+          if (!before?.trim()) { results.push({ skillName, ok: false, error: "No instructions" }); if (!continueOnError) break; continue; }
           const result = await optimizeInstruction(before, mode, skillName);
           await setSkillInstructions(resolver, skillName, result.optimized);
           results.push({ skillName, ok: true });
         } catch (e) {
-          results.push({
-            skillName,
-            ok: false,
-            error: e instanceof Error ? e.message : String(e),
-          });
+          results.push({ skillName, ok: false, error: e instanceof Error ? e.message : String(e) });
           if (!continueOnError) break;
         }
       }
       updateJob(id, { status: "completed", progress: 1, result: { results } });
     } catch (e) {
-      updateJob(id, {
-        status: "failed",
-        error: e instanceof Error ? e.message : String(e),
-        errorCode: "OPTIMIZE_ERROR",
-      });
+      updateJob(id, { status: "failed", error: e instanceof Error ? e.message : String(e), errorCode: "OPTIMIZE_ERROR" });
     }
   })();
 }
 
-async function handleRaceModels(
+async function handleOptimizeJudge(
   res: import("node:http").ServerResponse,
-  body: unknown
+  body: unknown,
+  req: import("node:http").IncomingMessage
 ): Promise<void> {
-  if (body == null || typeof body !== "object") {
-    sendError(res, 400, "Body must be RaceModelsRequest object", "INVALID_INPUT");
+  const b = body as {
+    instructions?: string;
+    input?: unknown;
+    response?: string;
+    rules?: JudgeRule[];
+    threshold?: number;
+    mode?: "normal" | "strong";
+    model?: string;
+  };
+  if (typeof b?.instructions !== "string" || !b.instructions.trim()) {
+    sendError(res, 400, "instructions is required", "INVALID_INPUT"); return;
+  }
+  if (typeof b?.response !== "string" || !b.response.trim()) {
+    sendError(res, 400, "response is required", "INVALID_INPUT"); return;
+  }
+  const tracker = makeTrackedClient(req);
+  try {
+    const result = await concurrencyGuard(() =>
+      judge({
+        instructions: b.instructions!,
+        response: b.response!,
+        rules: b.rules ?? [],
+        threshold: b.threshold ?? 0.8,
+        mode: b.mode === "strong" ? "strong" : "normal",
+        model: b.model,
+        client: tracker.client,
+      })
+    );
+    sendOk(res, { ...result, usage: toUsageResponse(tracker.getUsage()) });
+  } catch (e: unknown) {
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === "QUEUE_FULL" && err.status === 503) { sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL"); return; }
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "JUDGE_ERROR");
+  }
+}
+
+async function handleOptimizeRules(
+  res: import("node:http").ServerResponse,
+  body: unknown,
+  req: import("node:http").IncomingMessage
+): Promise<void> {
+  const b = body as {
+    instructions?: string;
+    examples?: Array<{ id?: string; input?: unknown; output?: unknown; label?: string; rationale?: string }>;
+    context?: string;
+    targetRuleCount?: number;
+    weightScale?: "1-3" | "1-5" | "1-10";
+    includeFormatRules?: boolean;
+    model?: string;
+  };
+
+  let finalInstructions: string;
+
+  if (Array.isArray(b?.examples) && b.examples.length > 0) {
+    // Contract path: derive rules from labeled examples
+    const synth = synthesizeInstructionsFromExamples(b.examples, b.context);
+    finalInstructions = b.instructions?.trim()
+      ? `${synth}\n\nAdditional context:\n${b.instructions.trim()}`
+      : synth;
+  } else if (typeof b?.instructions === "string" && b.instructions.trim()) {
+    // Backwards-compat: rules from instructions directly
+    finalInstructions = b.instructions.trim();
+  } else {
+    sendError(res, 400, "Provide examples (array of {input, output, label}) or instructions", "INVALID_INPUT");
     return;
   }
-  const req = body as { testCases?: unknown[]; candidates?: unknown[] };
-  const totalRuns = (req.testCases?.length ?? 1) * (req.candidates?.length ?? 1);
-  const { id } = createJob("race", { totalRuns });
+
+  const tracker = makeTrackedClient(req);
+  try {
+    const result = await concurrencyGuard(() =>
+      generateJudgeRules({
+        instructions: finalInstructions,
+        targetRuleCount: b?.targetRuleCount,
+        weightScale: b?.weightScale,
+        includeFormatRules: b?.includeFormatRules,
+        model: b?.model,
+        client: tracker.client,
+      })
+    );
+    sendOk(res, { ...result, usage: toUsageResponse(tracker.getUsage()) });
+  } catch (e: unknown) {
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === "QUEUE_FULL" && err.status === 503) { sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL"); return; }
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "RULES_ERROR");
+  }
+}
+
+async function handleOptimizeRulesOptimize(
+  res: import("node:http").ServerResponse,
+  body: unknown,
+  req: import("node:http").IncomingMessage
+): Promise<void> {
+  const b = body as {
+    existingRules?: JudgeRule[];
+    examples?: Array<{ id?: string; input?: string; output?: string; label?: "good" | "bad"; rationale?: string }>;
+    ruleMode?: "append" | "replace";
+    instructions?: string;
+    targetRuleCount?: number;
+    weightScale?: "1-3" | "1-5" | "1-10";
+    model?: string;
+  };
+  if (!Array.isArray(b?.existingRules)) b.existingRules = [];
+  if (!Array.isArray(b?.examples) || b.examples.length === 0) {
+    sendError(res, 400, "examples (with rationale) are required", "INVALID_INPUT");
+    return;
+  }
+  const ruleMode = b.ruleMode ?? "replace";
+  const examples = b.examples.map((e) => ({
+    id: e.id,
+    input: e.input,
+    output: e.output,
+    label: (e.label === "good" || e.label === "bad" ? e.label : "good") as "good" | "bad",
+    rationale: e.rationale ?? "",
+  }));
+  const tracker = makeTrackedClient(req);
+  try {
+    const result = await concurrencyGuard(() =>
+      optimizeJudgeRules({
+        existingRules: b.existingRules!,
+        examples,
+        ruleMode,
+        instructions: b.instructions,
+        targetRuleCount: b?.targetRuleCount,
+        weightScale: b?.weightScale,
+        model: b?.model,
+        client: tracker.client,
+      })
+    );
+    sendOk(res, { ...result, usage: toUsageResponse(tracker.getUsage()) });
+  } catch (e: unknown) {
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === "QUEUE_FULL" && err.status === 503) { sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL"); return; }
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "RULES_OPTIMIZE_ERROR");
+  }
+}
+
+async function handleOptimizeFix(
+  res: import("node:http").ServerResponse,
+  body: unknown,
+  req: import("node:http").IncomingMessage
+): Promise<void> {
+  const b = body as { instructions?: string; judgeFeedback?: object; model?: string };
+  if (typeof b?.instructions !== "string" || !b.instructions.trim()) {
+    sendError(res, 400, "instructions is required", "INVALID_INPUT"); return;
+  }
+  if (!b?.judgeFeedback || typeof b.judgeFeedback !== "object") {
+    sendError(res, 400, "judgeFeedback is required", "INVALID_INPUT"); return;
+  }
+  const tracker = makeTrackedClient(req);
+  try {
+    const result = await concurrencyGuard(() =>
+      fixInstructions({ instructions: b.instructions!, judgeFeedback: b.judgeFeedback!, model: b.model, client: tracker.client })
+    );
+    sendOk(res, { ...result, usage: toUsageResponse(tracker.getUsage()) });
+  } catch (e: unknown) {
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === "QUEUE_FULL" && err.status === 503) { sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL"); return; }
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "FIX_ERROR");
+  }
+}
+
+async function handleOptimizeCompare(
+  res: import("node:http").ServerResponse,
+  body: unknown,
+  req: import("node:http").IncomingMessage
+): Promise<void> {
+  const b = body as {
+    instructions?: string;
+    responses?: Array<{ id: string; text: string }>;
+    rules?: JudgeRule[];
+    threshold?: number;
+    mode?: "normal" | "strong";
+    model?: string;
+  };
+  if (typeof b?.instructions !== "string" || !b.instructions.trim()) {
+    sendError(res, 400, "instructions is required", "INVALID_INPUT"); return;
+  }
+  if (!Array.isArray(b?.responses) || b.responses.length < 2) {
+    sendError(res, 400, "responses must be an array of at least 2 items", "INVALID_INPUT"); return;
+  }
+  const tracker = makeTrackedClient(req);
+  try {
+    const result = await concurrencyGuard(() =>
+      compare({ instructions: b.instructions!, responses: b.responses!, rules: b.rules, threshold: b.threshold ?? 0.8, mode: b.mode, model: b.model, client: tracker.client })
+    );
+    sendOk(res, { ...result, usage: toUsageResponse(tracker.getUsage()) });
+  } catch (e: unknown) {
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === "QUEUE_FULL" && err.status === 503) { sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL"); return; }
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "COMPARE_ERROR");
+  }
+}
+
+async function handleOptimizeGenerate(
+  res: import("node:http").ServerResponse,
+  body: unknown,
+  req: import("node:http").IncomingMessage
+): Promise<void> {
+  const b = body as {
+    // Contract fields
+    description?: string;
+    testCases?: Array<{ id: string; input?: unknown; inputMd?: string }>;
+    rules?: JudgeRule[];
+    threshold?: number;
+    maxCycles?: number;
+    mode?: string;
+    targetModel?: string | { model: string; class?: "weak" | "normal" | "strong" };
+    // Legacy / pass-through fields
+    seedInstructions?: string;
+    judgeThreshold?: number;
+    targetAverageThreshold?: number;
+    loop?: { maxCycles: number; forceContinueAfterPass?: boolean; patienceCycles?: number };
+    judgeRules?: JudgeRule[];
+  };
+
+  // Resolve seed instructions: prefer explicit seedInstructions, fall back to description
+  const seedInstructions = b?.seedInstructions?.trim() || b?.description?.trim();
+  if (!seedInstructions) {
+    sendError(res, 400, "description (or seedInstructions) is required", "INVALID_INPUT"); return;
+  }
+  if (!Array.isArray(b?.testCases) || b.testCases.length === 0) {
+    sendError(res, 400, "testCases must be a non-empty array", "INVALID_INPUT"); return;
+  }
+
+  // Normalise test cases: accept {input} or {inputMd}
+  const normalisedTestCases = b.testCases.map((tc) => ({
+    id: tc.id,
+    inputMd: tc.inputMd ?? toInputMd(tc.input),
+  }));
+
+  // Normalise targetModel
+  let targetModel: { model: string; class: "weak" | "normal" | "strong" };
+  if (typeof b?.targetModel === "string") {
+    targetModel = { model: b.targetModel, class: "normal" };
+  } else if (b?.targetModel && typeof b.targetModel === "object") {
+    targetModel = { model: b.targetModel.model, class: b.targetModel.class ?? "normal" };
+  } else {
+    targetModel = { model: "openai/gpt-4o-mini", class: "normal" };
+  }
+
+  // Normalise thresholds and loop
+  const judgeThreshold = b?.judgeThreshold ?? b?.threshold ?? 0.8;
+  const targetAverageThreshold = b?.targetAverageThreshold ?? b?.threshold ?? 0.85;
+  const loop = b?.loop ?? { maxCycles: b?.maxCycles ?? 5 };
+  const judgeRules = b?.judgeRules ?? b?.rules;
+
+  const tracker = makeTrackedClient(req);
+  const { id } = createJob("generate-instructions", { preview: seedInstructions.slice(0, 80) } as never);
   updateJob(id, { status: "running" });
-  sendOk(res, { jobId: id, status: "running", totalRuns });
+  sendOk(res, { jobId: id, status: "running" });
 
   (async () => {
     try {
-      const result = await concurrencyGuard(() => raceModels(body as Parameters<typeof raceModels>[0]));
-      updateJob(id, { status: "completed", progress: 1, result });
-    } catch (e) {
-      updateJob(id, {
-        status: "failed",
-        error: e instanceof Error ? e.message : String(e),
-        errorCode: "OPENROUTER_HTTP_ERROR",
+      const result = await generateInstructions({
+        seedInstructions,
+        testCases: normalisedTestCases,
+        call: "ask",
+        targetModel,
+        judgeRules,
+        judgeThreshold,
+        targetAverageThreshold,
+        loop,
+        optimizer: { mode: "strong" },
+        client: tracker.client,
       });
+      const usage = toUsageResponse(tracker.getUsage());
+      updateJob(id, { status: "completed", progress: 1, result: { ...result, usage } });
+    } catch (e) {
+      updateJob(id, { status: "failed", error: e instanceof Error ? e.message : String(e), errorCode: "GENERATE_ERROR" });
     }
   })();
+}
+
+async function handleRaceModels(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
+  if (body == null || typeof body !== "object") { sendError(res, 400, "Body must be RaceModelsRequest object", "INVALID_INPUT"); return; }
+  const b = body as {
+    type?: "model" | "temperature";
+    taskName?: string;
+    call?: "ask" | "askJson";
+    skill?: { strongSystem: string; weakSystem?: string };
+    testCases?: Array<{ id: string; inputMd?: string; input?: unknown }>;
+    judgeRules?: JudgeRule[];
+    threshold?: number;
+    models?: Array<{ id: string; model: string; vendor?: string | string[]; class: "weak" | "normal" | "strong"; options?: { maxTokens?: number; temperature?: number; timeoutMs?: number } }>;
+    model?: string;
+    temperatures?: number[];
+    functionKey?: string;
+    applyDefaults?: boolean;
+    raceLabel?: string;
+    notes?: string;
+  };
+  let request = body as Parameters<typeof raceModels>[0];
+  let raceType: "model" | "temperature" = "model";
+  if (b.type === "temperature" && typeof b.model === "string" && Array.isArray(b.temperatures) && b.temperatures.length > 0) {
+    raceType = "temperature";
+    const testCases = (b.testCases ?? []).map((tc) => ({ id: tc.id, inputMd: (tc as { inputMd?: string }).inputMd ?? toInputMd((tc as { input?: unknown }).input) }));
+    if (!testCases.length && b.functionKey) {
+      sendError(res, 400, "testCases required for temperature race", "INVALID_INPUT");
+      return;
+    }
+    const models = b.temperatures.map((t, i) => ({
+      id: `temp-${t}`,
+      model: b.model!,
+      class: "normal" as const,
+      options: { temperature: t, maxTokens: b.judgeRules ? undefined : 2048 },
+    }));
+    const skillSystem = b.skill?.strongSystem ?? (b.functionKey ? "" : "Follow the user request.");
+    request = {
+      taskName: b.taskName ?? "temperature-race",
+      call: b.call ?? "ask",
+      skill: { strongSystem: skillSystem || "Follow the user request." },
+      testCases: testCases.length ? testCases : [{ id: "cal", inputMd: "Calibrate." }],
+      judgeRules: b.judgeRules,
+      threshold: b.threshold ?? 0.8,
+      models,
+      client: (body as { client?: unknown }).client,
+    } as Parameters<typeof raceModels>[0];
+    if (b.functionKey?.trim() && !request.skill.strongSystem) {
+      const resolver = getSkillsResolver();
+      request.skill.strongSystem = await getSkillInstructions(resolver, b.functionKey.trim()) || "Follow the user request.";
+      (request as { judgeRules?: JudgeRule[] }).judgeRules = await getSkillRules(resolver, b.functionKey.trim());
+    }
+  }
+  if (b.functionKey?.trim() && (!b.skill?.strongSystem || !b.testCases?.length) && Array.isArray(b.models) && b.models.length > 0 && raceType === "model") {
+    const resolver = getSkillsResolver();
+    const instructions = await getSkillInstructions(resolver, b.functionKey.trim());
+    const rules = await getSkillRules(resolver, b.functionKey.trim());
+    const testCases = (b.testCases ?? []).map((tc) => ({ id: tc.id, inputMd: (tc as { inputMd?: string }).inputMd ?? toInputMd((tc as { input?: unknown }).input) }));
+    if (!testCases.length) { sendError(res, 400, "testCases required when using functionKey", "INVALID_INPUT"); return; }
+    request = {
+      taskName: b.taskName ?? b.functionKey,
+      call: b.call ?? "ask",
+      skill: { strongSystem: instructions || "Follow the user request." },
+      testCases,
+      judgeRules: rules?.length ? rules : undefined,
+      threshold: b.threshold ?? 0.8,
+      models: b.models,
+      client: (body as { client?: unknown }).client,
+    } as Parameters<typeof raceModels>[0];
+  }
+  const totalRuns = (request.testCases?.length ?? 1) * (request.models?.length ?? 1);
+  const { id } = createJob("race", { totalRuns });
+  updateJob(id, { status: "running" });
+  sendOk(res, { jobId: id, status: "running", totalRuns });
+  const functionKey = b.functionKey?.trim();
+  const applyDefaults = b.applyDefaults !== false;
+  const raceLabel = b.raceLabel;
+  const notes = b.notes;
+  (async () => {
+    try {
+      const result = await concurrencyGuard(() => raceModels(request));
+      if (functionKey && result && typeof result === "object" && "ranking" in result && "bestModelId" in result) {
+        const resolver = getSkillsResolver();
+        const ranking = (result as { ranking: Array<{ modelId: string; avgScoreNormalized: number; passRate: number; avgLostPoints: number }> }).ranking;
+        const details = (result as { details: Array<{ modelId: string; perTest: Array<{ judge: { scoreNormalized: number; lostPoints: number } }> }> }).details;
+        const attempts = details.map((d) => {
+          const n = d.perTest?.length ?? 0;
+          const perTest = d.perTest as Array<{ judge: { scoreNormalized: number; lostPoints: number; pass?: boolean } }>;
+          return {
+            modelId: d.modelId,
+            avgScoreNormalized: n > 0 ? perTest.reduce((s, t) => s + t.judge.scoreNormalized, 0) / n : 0,
+            passRate: n > 0 ? perTest.filter((t) => t.judge.pass).length / n : 0,
+            avgLostPoints: n > 0 ? perTest.reduce((s, t) => s + t.judge.lostPoints, 0) / n : 0,
+          };
+        });
+        const bestModelId = (result as { bestModelId: string }).bestModelId;
+        const bestCandidate = request.models?.find((m: { id: string }) => m.id === bestModelId) as { id: string; model: string; options?: { maxTokens?: number; temperature?: number } } | undefined;
+        const raceId = `${new Date().toISOString().replace(/[:.]/g, "-")}#${id}`;
+        const record: RaceRecord = {
+          raceId,
+          type: raceType,
+          label: raceLabel,
+          notes,
+          applyDefaults,
+          candidates: { models: request.models },
+          attempts: attempts as RaceRecord["attempts"],
+          winners: { best: bestModelId, cheapest: bestModelId, fastest: bestModelId, balanced: bestModelId },
+          runAt: new Date().toISOString(),
+          summary: (result as { summary?: string }).summary,
+        };
+        await appendRace(resolver, functionKey, record);
+        if (applyDefaults && bestCandidate) {
+          const profile: RaceProfile = {
+            model: bestCandidate.model,
+            temperature: bestCandidate.options?.temperature,
+            maxTokens: bestCandidate.options?.maxTokens,
+          };
+          await setProfiles(resolver, functionKey, { best: profile, cheapest: profile, fastest: profile, balanced: profile });
+        }
+        if (applyDefaults && raceType === "temperature" && b.temperatures?.length === 1) {
+          const defaultMaxTokens = bestCandidate?.options?.maxTokens ?? 2048;
+          await setDefaults(resolver, functionKey, { maxTokens: defaultMaxTokens });
+        }
+      }
+      updateJob(id, { status: "completed", progress: 1, result });
+    } catch (e) {
+      updateJob(id, { status: "failed", error: e instanceof Error ? e.message : String(e), errorCode: "OPENROUTER_HTTP_ERROR" });
+    }
+  })();
+}
+
+// --- Functions lifecycle handlers ---
+
+async function handleGetFunctionProfiles(res: import("node:http").ServerResponse, functionId: string): Promise<void> {
+  const resolver = getSkillsResolver();
+  const names = await getSkillNamesAsync(resolver);
+  if (!names.includes(functionId)) { sendError(res, 404, `Function '${functionId}' not found`, "FUNCTION_NOT_FOUND"); return; }
+  try {
+    const { defaults, profiles } = await getProfiles(resolver, functionId);
+    sendOk(res, { defaults: defaults ?? null, profiles: profiles ?? null });
+  } catch (e) {
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "PROFILES_ERROR");
+  }
+}
+
+async function handleGetFunctionRaceReport(
+  res: import("node:http").ServerResponse,
+  functionId: string,
+  query: Record<string, string | undefined>
+): Promise<void> {
+  const resolver = getSkillsResolver();
+  const names = await getSkillNamesAsync(resolver);
+  if (!names.includes(functionId)) { sendError(res, 404, `Function '${functionId}' not found`, "FUNCTION_NOT_FOUND"); return; }
+  try {
+    const last = query.last != null ? parseInt(String(query.last), 10) : undefined;
+    const since = query.since;
+    const raceId = query.raceId;
+    const races = await getRaceReport(resolver, functionId, { last: Number.isFinite(last) ? last : undefined, since, raceId });
+    sendOk(res, { races });
+  } catch (e) {
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "RACE_REPORT_ERROR");
+  }
+}
+
+async function handleCreateFunction(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
+  const b = body as {
+    id?: string;
+    description?: string;
+    seedInstructions?: string;
+    instructions?: string;
+    inputSchema?: unknown;
+    outputSchema?: unknown;
+    rules?: JudgeRule[];
+    scoreGate?: number;
+    modelPolicy?: string;
+    examples?: unknown[];
+  };
+  if (typeof b?.id !== "string" || !b.id.trim()) { sendError(res, 400, "id is required", "INVALID_INPUT"); return; }
+  const instructions = b.seedInstructions?.trim() || b.instructions?.trim();
+  if (!instructions) { sendError(res, 400, "seedInstructions (or instructions) is required", "INVALID_INPUT"); return; }
+  const cleanId = b.id.trim();
+  const resolver = getSkillsResolver();
+  try {
+    await setSkillInstructions(resolver, cleanId, instructions);
+    if (b.rules?.length) await setSkillRules(resolver, cleanId, b.rules);
+    const meta = await getFunctionMeta(resolver, cleanId);
+    await setFunctionMeta(resolver, cleanId, {
+      ...meta,
+      status: "draft",
+      scoreGate: typeof b.scoreGate === "number" ? b.scoreGate : meta.scoreGate,
+    });
+    sendOk(res, {
+      id: cleanId,
+      status: "draft",
+      version: null,
+      endpoint: `/functions/${cleanId}/run`,
+      scoreGate: typeof b.scoreGate === "number" ? b.scoreGate : meta.scoreGate,
+      modelPolicy: b.modelPolicy ?? "auto",
+    });
+  } catch (e) {
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "CREATE_ERROR");
+  }
+}
+
+async function handleGetFunction(res: import("node:http").ServerResponse, name: string): Promise<void> {
+  const resolver = getSkillsResolver();
+  try {
+    const allNames = await getSkillNamesAsync(resolver);
+    if (!allNames.includes(name)) { sendError(res, 404, `Function '${name}' not found`, "FUNCTION_NOT_FOUND"); return; }
+    const instructions = await getSkillInstructions(resolver, name);
+    const meta = await getFunctionMeta(resolver, name);
+    sendOk(res, {
+      id: name,
+      instructions,
+      status: meta.status,
+      version: meta.version,
+      releasedAt: meta.releasedAt,
+      lastValidation: meta.lastValidation,
+      scoreGate: meta.scoreGate,
+    });
+  } catch (e) {
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "GET_FUNCTION_ERROR");
+  }
+}
+
+async function handleGetFunctionTestCases(res: import("node:http").ServerResponse, name: string): Promise<void> {
+  const resolver = getSkillsResolver();
+  try {
+    const raw = await getSkillTestCases(resolver, name);
+    // Expose in contract shape: {id, input, expectedOutput}
+    const testCases = raw.map((tc) => ({
+      id: tc.id,
+      input: tc.inputMd,
+      expectedOutput: tc.expectedOutputMd ?? undefined,
+    }));
+    sendOk(res, { testCases });
+  } catch (e) {
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "TEST_CASES_ERROR");
+  }
+}
+
+async function handlePutFunctionTestCases(
+  res: import("node:http").ServerResponse,
+  body: unknown,
+  name: string
+): Promise<void> {
+  const b = body as {
+    testCases?: Array<{
+      id: string;
+      // Contract shape: input is object or string
+      input?: unknown;
+      expectedOutput?: unknown;
+      // Legacy shape: inputMd / expectedOutputMd
+      inputMd?: string;
+      expectedOutputMd?: string;
+    }>;
+  };
+  if (!Array.isArray(b?.testCases)) { sendError(res, 400, "testCases must be an array", "INVALID_INPUT"); return; }
+  const resolver = getSkillsResolver();
+  try {
+    const stored = b.testCases.map((tc) => ({
+      id: tc.id,
+      inputMd: tc.inputMd ?? toInputMd(tc.input),
+      expectedOutputMd: tc.expectedOutputMd ?? (tc.expectedOutput != null ? toInputMd(tc.expectedOutput) : undefined),
+    }));
+    await setSkillTestCases(resolver, name, stored);
+    sendOk(res, { count: stored.length });
+  } catch (e) {
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "TEST_CASES_ERROR");
+  }
+}
+
+async function handleValidateFunction(
+  res: import("node:http").ServerResponse,
+  name: string,
+  req: import("node:http").IncomingMessage
+): Promise<void> {
+  const resolver = getSkillsResolver();
+  const tracker = makeTrackedClient(req);
+  try {
+    const result = await concurrencyGuard(() => validateFunction(resolver, name, { client: tracker.client }));
+    sendOk(res, { ...result, usage: toUsageResponse(tracker.getUsage()) });
+  } catch (e: unknown) {
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === "QUEUE_FULL" && err.status === 503) { sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL"); return; }
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "VALIDATE_ERROR");
+  }
+}
+
+async function handleReleaseFunction(res: import("node:http").ServerResponse, name: string): Promise<void> {
+  const resolver = getSkillsResolver();
+  try {
+    const meta = await getFunctionMeta(resolver, name);
+    if (!meta.lastValidation) {
+      sendError(res, 422, "Function must be validated before release. Call POST /functions/:id:validate first.", "NOT_VALIDATED"); return;
+    }
+    if (!meta.lastValidation.passed) {
+      sendError(res, 422, `Validation score ${meta.lastValidation.score.toFixed(2)} is below gate ${meta.scoreGate}. Improve the function and re-validate before releasing.`, "SCORE_BELOW_GATE"); return;
+    }
+    const version = `v${new Date().toISOString().slice(0, 10)}.${Date.now()}`;
+    const releasedAt = new Date().toISOString();
+    await setFunctionMeta(resolver, name, { ...meta, status: "released", version, releasedAt });
+    sendOk(res, { version, score: meta.lastValidation.score, releasedAt, endpoint: `/functions/${name}/versions/${version}/run` });
+  } catch (e) {
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "RELEASE_ERROR");
+  }
+}
+
+async function handleFunctionVersions(res: import("node:http").ServerResponse, name: string): Promise<void> {
+  const resolver = getSkillsResolver();
+  try {
+    const versions = await getSkillInstructionVersions(resolver, name);
+    sendOk(res, { versions });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes("does not support version APIs")) {
+      sendOk(res, { versions: [], note: "Version history requires a Git-backed resolver." }); return;
+    }
+    sendError(res, 500, message, "VERSIONS_ERROR");
+  }
+}
+
+async function handleFunctionOptimize(
+  res: import("node:http").ServerResponse,
+  body: unknown,
+  name: string
+): Promise<void> {
+  const b = body as { mode?: "weak" | "strong"; runValidation?: boolean };
+  const resolver = getSkillsResolver();
+  const mode = b?.mode === "weak" ? "weak" : "normal";
+  try {
+    const before = await getSkillInstructions(resolver, name);
+    if (!before?.trim()) { sendError(res, 404, `No instructions for function: ${name}`, "FUNCTION_NOT_FOUND"); return; }
+    const result = await concurrencyGuard(() => optimizeInstruction(before, mode, name));
+    await setSkillInstructions(resolver, name, result.optimized);
+    const validationSummary = b?.runValidation
+      ? await runFixtures({ resolver, skillName: name }).then((r) => ({ ok: r.ok, failed: r.failed }))
+      : undefined;
+    sendOk(res, { before, after: result.optimized, validationSummary, usage: result.usage });
+  } catch (e: unknown) {
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === "QUEUE_FULL" && err.status === 503) { sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL"); return; }
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "OPTIMIZE_ERROR");
+  }
+}
+
+async function handleFunctionPush(res: import("node:http").ServerResponse, name: string): Promise<void> {
+  try {
+    const localPath = process.env.SKILLS_LOCAL_PATH;
+    if (!localPath) { sendError(res, 422, "SKILLS_LOCAL_PATH env var is required to push content to the remote git repo.", "PUSH_NOT_CONFIGURED"); return; }
+    await pushSkillsContent({ localPath, message: `release: ${name}` });
+    sendOk(res, { id: name, pushed: true });
+  } catch (e) {
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "PUSH_ERROR");
+  }
 }
 
 async function handleContentSync(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
@@ -432,124 +1031,60 @@ async function handleContentSync(res: import("node:http").ServerResponse, body: 
     updateJob(id, { status: "running" });
     const args = ["run", "content:sync:no-test", "--", "--no-push", "--optimize"];
     if (b.dryRun) args.push("--dry-run");
-    const child = spawn("npm", args, {
-      cwd: rootDir,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
-    });
+    const child = spawn("npm", args, { cwd: rootDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
     child.stdout?.on("data", (chunk) => appendJobLog(id, chunk.toString()));
     child.stderr?.on("data", (chunk) => appendJobLog(id, chunk.toString()));
     child.on("close", (code) => {
-      updateJob(id, {
-        status: code === 0 ? "completed" : "failed",
-        result: code === 0 ? { ok: true } : undefined,
-        error: code !== 0 ? `Exit code ${code}` : undefined,
-        errorCode: code !== 0 ? "MISSING_OPTIONAL_DEP" : undefined,
-      });
+      updateJob(id, { status: code === 0 ? "completed" : "failed", result: code === 0 ? { ok: true } : undefined, error: code !== 0 ? `Exit code ${code}` : undefined, errorCode: code !== 0 ? "MISSING_OPTIONAL_DEP" : undefined });
     });
-    sendOk(res, { jobId: id, status: "running" });
-    return;
+    sendOk(res, { jobId: id, status: "running" }); return;
   }
   try {
     const resolver = getSkillsResolver();
-    const report = await updateLibraryIndex({
-      resolver,
-      prefix: "skills/",
-      dryRun: b.dryRun ?? false,
-    });
+    const report = await updateLibraryIndex({ resolver, prefix: "skills/", dryRun: b.dryRun ?? false });
     const st = report.stats;
-    sendOk(res, {
-      synced: (st?.skillsUpdated ?? 0) + (st?.skillsUnchanged ?? 0),
-      created: 0,
-      updated: st?.skillsUpdated ?? 0,
-      unchanged: st?.skillsUnchanged ?? 0,
-      errors: report.errors?.map((e: { reason?: string }) => e.reason ?? String(e)) ?? [],
-    });
+    sendOk(res, { synced: (st?.skillsUpdated ?? 0) + (st?.skillsUnchanged ?? 0), created: 0, updated: st?.skillsUpdated ?? 0, unchanged: st?.skillsUnchanged ?? 0, errors: report.errors?.map((e: { reason?: string }) => e.reason ?? String(e)) ?? [] });
   } catch (e) {
     sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
   }
 }
 
 async function handleContentIndex(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
-  const b = (body as { root?: string; prefix?: string }) ?? {};
+  const b = (body as { prefix?: string }) ?? {};
   const resolver = getSkillsResolver();
   try {
-    const report = await updateLibraryIndex({
-      resolver,
-      prefix: b.prefix ?? "skills/",
-      dryRun: false,
-    });
-    const skills: string[] = (report.refKeys ?? []).map((key: string) => {
-      const m = key.match(/[^/]+\.json$/);
-      return m ? m[0].replace(".json", "") : key;
-    });
-    sendOk(res, {
-      indexed: report.stats?.skillsTotal ?? 0,
-      skills,
-      errors: report.errors?.map((e: { reason?: string }) => e.reason ?? String(e)) ?? [],
-    });
+    const report = await updateLibraryIndex({ resolver, prefix: b.prefix ?? "skills/", dryRun: false });
+    const skills: string[] = (report.refKeys ?? []).map((key: string) => { const m = key.match(/[^/]+\.json$/); return m ? m[0].replace(".json", "") : key; });
+    sendOk(res, { indexed: report.stats?.skillsTotal ?? 0, skills, errors: report.errors?.map((e: { reason?: string }) => e.reason ?? String(e)) ?? [] });
   } catch (e) {
     sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
   }
 }
 
-async function handleContentFixtures(
-  res: import("node:http").ServerResponse,
-  body: unknown
-): Promise<void> {
-  const b = (body as { action?: string; skillName?: string; prefix?: string }) ?? {};
+async function handleContentFixtures(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
+  const b = (body as { skillName?: string }) ?? {};
   const resolver = getSkillsResolver();
   try {
-    const report = await runFixtures({
-      resolver,
-      skillName: b.skillName,
-    });
+    const report = await runFixtures({ resolver, skillName: b.skillName });
     const bySkill = new Map<string, { status: "passed" | "failed"; errors: string[] }>();
     for (const r of report.results) {
-      const key = r.skillId;
-      const existing = bySkill.get(key);
-      const hasError = !r.valid;
+      const existing = bySkill.get(r.skillId);
       const errs = (r.errors ?? []) as string[];
-      if (existing) {
-        if (hasError) {
-          existing.status = "failed";
-          existing.errors.push(...errs);
-        }
-      } else {
-        bySkill.set(key, {
-          status: hasError ? "failed" : "passed",
-          errors: hasError ? [...errs] : [],
-        });
-      }
+      if (existing) { if (!r.valid) { existing.status = "failed"; existing.errors.push(...errs); } }
+      else { bySkill.set(r.skillId, { status: r.valid ? "passed" : "failed", errors: r.valid ? [] : [...errs] }); }
     }
-    const results = Array.from(bySkill.entries()).map(([skill, v]) =>
-      v.errors.length ? { skill, status: "failed" as const, errors: v.errors } : { skill, status: v.status }
-    );
-    const total = report.passed + report.failed;
-    sendOk(res, {
-      total,
-      passed: report.passed,
-      failed: report.failed,
-      skipped: 0,
-      results,
-    });
+    const results = Array.from(bySkill.entries()).map(([skill, v]) => v.errors.length ? { skill, status: "failed" as const, errors: v.errors } : { skill, status: v.status });
+    sendOk(res, { total: report.passed + report.failed, passed: report.passed, failed: report.failed, skipped: 0, results });
   } catch (e) {
     sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
   }
 }
 
-async function handleContentLayoutLint(
-  res: import("node:http").ServerResponse,
-  body: unknown
-): Promise<void> {
+async function handleContentLayoutLint(res: import("node:http").ServerResponse): Promise<void> {
   const resolver = getSkillsResolver();
   try {
     const report = await runLayoutLint(resolver);
-    const issues = report.errors.map((issue) => ({
-      path: "skills/",
-      issue,
-      severity: "error" as const,
-    }));
+    const issues = report.errors.map((issue) => ({ path: "skills/", issue, severity: "error" as const }));
     sendOk(res, { valid: report.ok, issues });
   } catch (e) {
     sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
@@ -567,235 +1102,215 @@ function parseQuery(url: string): Record<string, string> {
   return out;
 }
 
-async function handler(
-  req: import("node:http").IncomingMessage,
-  res: import("node:http").ServerResponse
-): Promise<void> {
+async function handler(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse): Promise<void> {
   const method = req.method ?? "GET";
   const url = req.url ?? "/";
   const pathStr = url.split("?")[0];
   const query = parseQuery(url);
-  const { segments, name, id } = parsePath(pathStr);
+  const { segments } = parsePath(pathStr);
 
-  if (method === "OPTIONS") {
-    res.writeHead(204, CORS_HEADERS);
-    res.end();
-    return;
-  }
+  if (method === "OPTIONS") { res.writeHead(204, CORS_HEADERS); res.end(); return; }
 
   if (pathStr === "/health" && method === "GET") {
     const resolver = getSkillsResolver();
     const names = await getSkillNamesAsync(resolver).catch(() => []);
     const hasOpenrouterKey = Boolean(process.env.OPENROUTER_API_KEY?.trim());
     const backends: string[] = ["openrouter"];
-    try {
-      await import("./backends/llamaCpp.js");
-      backends.push("llama-cpp");
-    } catch {
-      // optional
-    }
-    sendOk(res, {
-      version: "2.1.0",
-      uptime: Math.floor((Date.now() - serverStartedAt) / 1000),
-      skills: names.length,
-      hasOpenrouterKey,
-      backends: [...new Set(backends)],
-    });
+    try { await import("./backends/llamaCpp.js"); backends.push("llama-cpp"); } catch { /* optional */ }
+    sendOk(res, { version: "2.2.0", uptime: Math.floor((Date.now() - serverStartedAt) / 1000), skills: names.length, hasOpenrouterKey, backends: [...new Set(backends)] });
     return;
   }
 
   const auth = requireAuth(req);
-  if (!auth.ok) {
-    sendError(res, auth.status, auth.message, "UNAUTHORIZED");
-    return;
-  }
+  if (!auth.ok) { sendError(res, auth.status, auth.message, "UNAUTHORIZED"); return; }
 
   if (pathStr === "/" || pathStr === "") {
     sendOk(res, {
-      name: "aifunctions",
-      version: "2.1.0",
+      name: "aifunctions", version: "2.2.0",
       endpoints: {
         "GET /health": "Health check",
-        "GET /skills": "List skills with metadata",
-        "GET /skills/:name": "Skill details",
-        "POST /skills/:name/run": "Run skill (body: { input, options })",
-        "POST /run": "Run skill (body: { skill, request, options })",
-        "POST /optimize/instructions": "Optimize raw or skill instructions",
-        "POST /optimize/skill": "Optimize one skill",
-        "POST /optimize/batch": "Optimize multiple skills",
-        "POST /race/models": "Race models (RaceModelsRequest)",
-        "POST /content/sync": "Content sync (returns job or data)",
-        "POST /content/index": "Build library index",
-        "POST /content/fixtures": "Run fixtures",
-        "POST /content/layout-lint": "Layout lint",
-        "GET /jobs": "List jobs",
-        "GET /jobs/:id": "Job status",
-        "GET /jobs/:id/logs": "Job logs",
+        "GET /skills": "List skills", "GET /skills/:name": "Skill detail",
+        "POST /skills/:name/run": "Run skill",
+        "POST /run": "Run skill (body: { skill, input, options })",
+        "POST /optimize/instructions": "Optimize raw instructions",
+        "POST /optimize/skill": "Optimize one skill in-place",
+        "POST /optimize/batch": "Optimize multiple skills (job)",
+        "POST /optimize/judge": "Score a response against rules",
+        "POST /optimize/rules": "Generate judge rules from examples or instructions",
+        "POST /optimize/rules-optimize": "Optimize existing judge rules from examples with rationale (append/replace)",
+        "POST /optimize/fix": "Fix instructions from judge feedback",
+        "POST /optimize/compare": "Compare 2+ responses by quality",
+        "POST /optimize/generate": "Generate instructions from test cases (job)",
+        "POST /race/models": "Race models (job)",
+        "POST /content/sync": "Content sync", "POST /content/index": "Build library index",
+        "POST /content/fixtures": "Run fixtures", "POST /content/layout-lint": "Layout lint",
+        "GET /functions": "List functions", "POST /functions": "Create function",
+        "GET /functions/:id": "Function detail",
+        "POST /functions/:id/run": "Run function",
+        "POST /functions/:id:optimize": "Optimize function instructions (job)",
+        "POST /functions/:id:validate": "Validate function quality",
+        "POST /functions/:id:release": "Release function (score-gated)",
+        "POST /functions/:id:push": "Push to remote git",
+        "GET /functions/:id/versions": "Version history",
+        "GET /functions/:id/profiles": "Race winner profiles and defaults",
+        "GET /functions/:id/race-report": "Race history (query: last, since, raceId)",
+        "GET /functions/:id/test-cases": "Get test cases",
+        "PUT /functions/:id/test-cases": "Set test cases",
+        "GET /jobs": "List jobs", "GET /jobs/:id": "Job status", "GET /jobs/:id/logs": "Job logs",
       },
     });
     return;
   }
 
+  // --- /skills ---
   if (segments[0] === "skills") {
-    if (method === "GET" && segments.length === 2) {
-      await handleSkillDetail(res, segments[1]!);
-      return;
-    }
+    if (pathStr === "/skills" && method === "GET") { await handleSkillsList(res, query); return; }
+    if (method === "GET" && segments.length === 2) { await handleSkillDetail(res, segments[1]!); return; }
     if (method === "POST" && segments.length === 3 && segments[2] === "run") {
       const body = await readJsonBody(req);
-      await handleRun(res, body, segments[1]);
-      return;
-    }
-    if (pathStr === "/skills" && method === "GET") {
-      await handleSkillsList(res, query);
-      return;
+      await handleRun(res, body, segments[1], req); return;
     }
   }
 
+  // --- /run ---
   if (pathStr === "/run" && method === "POST") {
-    try {
-      const body = await readJsonBody(req);
-      await handleRun(res, body);
-    } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
-    }
+    try { const body = await readJsonBody(req); await handleRun(res, body, undefined, req); }
+    catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
     return;
   }
 
-  if (pathStr === "/optimize/instructions" && method === "POST") {
-    try {
-      const body = await readJsonBody(req);
-      await handleOptimizeInstructions(res, body);
-    } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
-    }
+  // --- /optimize/* ---
+  const optimizeHandlers: Record<string, (res: import("node:http").ServerResponse, body: unknown) => Promise<void>> = {
+    "/optimize/instructions": (r, b) => handleOptimizeInstructions(r, b),
+    "/optimize/skill": (r, b) => handleOptimizeSkill(r, b),
+    "/optimize/batch": (r, b) => handleOptimizeBatch(r, b),
+  };
+  if (optimizeHandlers[pathStr] && method === "POST") {
+    try { const body = await readJsonBody(req); await optimizeHandlers[pathStr]!(res, body); }
+    catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+    return;
+  }
+  if (pathStr === "/optimize/judge" && method === "POST") {
+    try { const body = await readJsonBody(req); await handleOptimizeJudge(res, body, req); }
+    catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+    return;
+  }
+  if (pathStr === "/optimize/rules" && method === "POST") {
+    try { const body = await readJsonBody(req); await handleOptimizeRules(res, body, req); }
+    catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+    return;
+  }
+  if (pathStr === "/optimize/rules-optimize" && method === "POST") {
+    try { const body = await readJsonBody(req); await handleOptimizeRulesOptimize(res, body, req); }
+    catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+    return;
+  }
+  if (pathStr === "/optimize/fix" && method === "POST") {
+    try { const body = await readJsonBody(req); await handleOptimizeFix(res, body, req); }
+    catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+    return;
+  }
+  if (pathStr === "/optimize/compare" && method === "POST") {
+    try { const body = await readJsonBody(req); await handleOptimizeCompare(res, body, req); }
+    catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+    return;
+  }
+  if (pathStr === "/optimize/generate" && method === "POST") {
+    try { const body = await readJsonBody(req); await handleOptimizeGenerate(res, body, req); }
+    catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
     return;
   }
 
-  if (pathStr === "/optimize/skill" && method === "POST") {
-    try {
-      const body = await readJsonBody(req);
-      await handleOptimizeSkill(res, body);
-    } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
-    }
-    return;
-  }
-
-  if (pathStr === "/optimize/batch" && method === "POST") {
-    try {
-      const body = await readJsonBody(req);
-      await handleOptimizeBatch(res, body);
-    } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
-    }
-    return;
-  }
-
+  // --- /race/models ---
   if (pathStr === "/race/models" && method === "POST") {
-    try {
-      const body = await readJsonBody(req);
-      await handleRaceModels(res, body);
-    } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
-    }
+    try { const body = await readJsonBody(req); await handleRaceModels(res, body); }
+    catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
     return;
   }
 
-  if (pathStr === "/content/sync" && method === "POST") {
-    try {
-      const body = await readJsonBody(req);
-      await handleContentSync(res, body);
-    } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
+  // --- /content/* ---
+  if (pathStr === "/content/sync" && method === "POST") { try { const body = await readJsonBody(req); await handleContentSync(res, body); } catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); } return; }
+  if (pathStr === "/content/index" && method === "POST") { try { const body = await readJsonBody(req); await handleContentIndex(res, body); } catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); } return; }
+  if (pathStr === "/content/fixtures" && method === "POST") { try { const body = await readJsonBody(req); await handleContentFixtures(res, body); } catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); } return; }
+  if (pathStr === "/content/layout-lint" && method === "POST") { try { await handleContentLayoutLint(res); } catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); } return; }
+
+  // --- /functions/* ---
+  if (segments[0] === "functions") {
+    const fnSegment = segments[1]; // may include colon-action e.g. "myId:validate"
+
+    if (pathStr === "/functions" && method === "GET") { await handleSkillsList(res, query); return; }
+    if (pathStr === "/functions" && method === "POST") {
+      try { const body = await readJsonBody(req); await handleCreateFunction(res, body); }
+      catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+      return;
     }
-    return;
+
+    if (fnSegment) {
+      // Colon-action routes: /functions/myId:validate, :release, :push, :optimize
+      const colonActions = [":validate", ":release", ":push", ":optimize"] as const;
+      for (const action of colonActions) {
+        if (method === "POST" && segments.length === 2 && fnSegment.endsWith(action)) {
+          const cleanId = fnSegment.slice(0, -action.length);
+          if (action === ":validate") { await handleValidateFunction(res, cleanId, req); return; }
+          if (action === ":release") { await handleReleaseFunction(res, cleanId); return; }
+          if (action === ":push") { await handleFunctionPush(res, cleanId); return; }
+          if (action === ":optimize") {
+            try { const body = await readJsonBody(req); await handleFunctionOptimize(res, body, cleanId); }
+            catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+            return;
+          }
+        }
+      }
+
+      // Sub-resource routes: /functions/:id/run, /optimize, /versions, /test-cases
+      if (segments.length === 3) {
+        const sub = segments[2]!;
+        if (method === "POST" && sub === "run") { const body = await readJsonBody(req); await handleRun(res, body, fnSegment, req); return; }
+        if (method === "POST" && sub === "optimize") {
+          try { const body = await readJsonBody(req); await handleFunctionOptimize(res, body, fnSegment); }
+          catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+          return;
+        }
+        if (method === "GET" && sub === "versions") { await handleFunctionVersions(res, fnSegment); return; }
+        if (method === "GET" && sub === "profiles") { await handleGetFunctionProfiles(res, fnSegment); return; }
+        if (method === "GET" && sub === "race-report") { await handleGetFunctionRaceReport(res, fnSegment, query as Record<string, string | undefined>); return; }
+        if (method === "GET" && sub === "test-cases") { await handleGetFunctionTestCases(res, fnSegment); return; }
+        if (method === "PUT" && sub === "test-cases") {
+          try { const body = await readJsonBody(req); await handlePutFunctionTestCases(res, body, fnSegment); }
+          catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+          return;
+        }
+      }
+
+      // GET /functions/:id
+      if (method === "GET" && segments.length === 2) { await handleGetFunction(res, fnSegment); return; }
+    }
   }
 
-  if (pathStr === "/content/index" && method === "POST") {
-    try {
-      const body = await readJsonBody(req);
-      await handleContentIndex(res, body);
-    } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
-    }
-    return;
-  }
-
-  if (pathStr === "/content/fixtures" && method === "POST") {
-    try {
-      const body = await readJsonBody(req);
-      await handleContentFixtures(res, body);
-    } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
-    }
-    return;
-  }
-
-  if (pathStr === "/content/layout-lint" && method === "POST") {
-    try {
-      const body = await readJsonBody(req);
-      await handleContentLayoutLint(res, body);
-    } catch (e) {
-      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
-    }
-    return;
-  }
-
+  // --- /jobs/* ---
   if (segments[0] === "jobs") {
     if (pathStr === "/jobs" && method === "GET") {
       const status = query.status as "running" | "completed" | "failed" | undefined;
       const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
       const offset = Math.max(0, Number(query.offset) || 0);
       const { jobs, total } = listJobs({ status, limit, offset });
-      const list = jobs.map((j) => ({
-        id: j.id,
-        type: j.type ?? "unknown",
-        status: j.status,
-        progress: j.progress ?? 0,
-        createdAt: new Date(j.createdAt).toISOString(),
-        updatedAt: new Date(j.updatedAt).toISOString(),
-      }));
-      sendOk(res, { jobs: list, total });
+      sendOk(res, { jobs: jobs.map((j) => ({ id: j.id, type: j.type ?? "unknown", status: j.status, progress: j.progress ?? 0, createdAt: new Date(j.createdAt).toISOString(), updatedAt: new Date(j.updatedAt).toISOString() })), total });
       return;
     }
-    if (segments.length === 2) {
+    if (segments.length >= 2) {
       const jobId = segments[1]!;
-      if (method === "GET" && !pathStr.endsWith("/logs")) {
+      if (method === "GET" && segments.length === 2) {
         const job = getJob(jobId);
-        if (!job) {
-          sendError(res, 404, "Job not found or expired", "JOB_NOT_FOUND");
-          return;
-        }
-        const data: Record<string, unknown> = {
-          id: job.id,
-          type: job.type ?? "unknown",
-          status: job.status,
-          progress: job.progress ?? 0,
-          createdAt: new Date(job.createdAt).toISOString(),
-          updatedAt: new Date(job.updatedAt).toISOString(),
-          result: job.result ?? null,
-        };
+        if (!job) { sendError(res, 404, "Job not found or expired", "JOB_NOT_FOUND"); return; }
+        const data: Record<string, unknown> = { id: job.id, type: job.type ?? "unknown", status: job.status, progress: job.progress ?? 0, createdAt: new Date(job.createdAt).toISOString(), updatedAt: new Date(job.updatedAt).toISOString(), result: job.result ?? null };
         if (job.status === "completed") data.completedAt = new Date(job.updatedAt).toISOString();
-        if (job.status === "failed") {
-          data.failedAt = new Date(job.updatedAt).toISOString();
-          data.error = { code: job.errorCode ?? "JOB_FAILED", message: job.error ?? "Job failed" };
-        }
-        sendOk(res, data);
-        return;
+        if (job.status === "failed") { data.failedAt = new Date(job.updatedAt).toISOString(); data.error = { code: job.errorCode ?? "JOB_FAILED", message: job.error ?? "Job failed" }; }
+        sendOk(res, data); return;
       }
-      if (method === "GET" && pathStr === `/jobs/${jobId}/logs`) {
+      if (method === "GET" && segments.length === 3 && segments[2] === "logs") {
         const logs = getJobLogs(jobId);
-        if (logs === null) {
-          sendError(res, 404, "Job not found or expired", "JOB_NOT_FOUND");
-          return;
-        }
-        const logEntries = logs.map((line) => ({
-          ts: new Date().toISOString(),
-          level: "info",
-          message: line.trim(),
-        }));
-        sendOk(res, { logs: logEntries });
+        if (logs === null) { sendError(res, 404, "Job not found or expired", "JOB_NOT_FOUND"); return; }
+        sendOk(res, { logs: logs.map((line) => ({ ts: new Date().toISOString(), level: "info", message: line.trim() })) });
         return;
       }
     }
@@ -811,15 +1326,13 @@ const server = createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`aifunctions REST API listening on http://localhost:${PORT}`);
-  console.log("  GET  /         - endpoint list");
-  console.log("  GET  /health   - health check");
-  console.log("  GET  /skills   - list skills");
-  console.log("  GET  /skills/:name - skill details");
-  console.log("  POST /skills/:name/run - run skill");
-  console.log("  POST /run      - run skill (body: { skill, request })");
-  console.log("  POST /optimize/instructions, /optimize/skill, /optimize/batch");
-  console.log("  POST /race/models");
-  console.log("  POST /content/sync, /content/index, /content/fixtures, /content/layout-lint");
-  console.log("  GET  /jobs/:id, GET /jobs/:id/logs");
+  console.log(`aifunctions REST API v2.2.0 on http://localhost:${PORT}`);
+  console.log("  GET  /health, GET /");
+  console.log("  GET/POST /skills, POST /run");
+  console.log("  POST /optimize/{instructions,skill,batch,judge,rules,fix,compare,generate}");
+  console.log("  GET/POST /functions, GET /functions/:id");
+  console.log("  POST /functions/:id:{optimize,validate,release,push}");
+  console.log("  GET /functions/:id/{versions,test-cases}, PUT /functions/:id/test-cases");
+  console.log("  POST /race/models, POST /content/{sync,index,fixtures,layout-lint}");
+  console.log("  GET /jobs, GET /jobs/:id, GET /jobs/:id/logs");
 });

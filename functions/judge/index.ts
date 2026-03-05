@@ -29,3 +29,7 @@ export type { GenerateJudgeRulesRequest, GenerateJudgeRulesOutput } from "./gene
 export { optimizeInstructionsV1 } from "./optimizeInstructionsV1.js";
 export { optimizeInstructionsV1 as optimizeInstructions } from "./optimizeInstructionsV1.js";
 export type { OptimizeInstructionsRequest, OptimizeInstructionsOutput } from "./optimizeInstructionsV1.js";
+/** @deprecated Use optimizeJudgeRules instead. */
+export { optimizeJudgeRulesV1 } from "./optimizeJudgeRulesV1.js";
+export { optimizeJudgeRulesV1 as optimizeJudgeRules } from "./optimizeJudgeRulesV1.js";
+export type { OptimizeJudgeRulesRequest, OptimizeJudgeRulesOutput } from "./optimizeJudgeRulesV1.js";

@@ -1,4 +1,4 @@
-import type { LlmMode } from "./types.js";
+import type { AskOptions, LlmMode } from "./types.js";
 
 export type ModePreset = {
   backend: "llama-cpp" | "openrouter";
@@ -43,4 +43,42 @@ export function getModePreset(mode: LlmMode): ModePreset {
       return getModePreset("normal");
     }
   }
+}
+
+export type ResolvedAskOptions = {
+  model?: string;
+  temperature: number;
+  maxTokens: number;
+};
+
+/**
+ * Resolve effective model, temperature, and maxTokens when opts.mode is set.
+ * Order: explicit opts.model/temperature/maxTokens override; then client config; then env; then preset.
+ * For "weak" mode, model lookup uses "normal" (OpenRouter has no weak preset model).
+ */
+export function resolveOptionsFromMode(
+  opts: AskOptions,
+  clientModels?: { normal?: string; strong?: string },
+  envOverrides?: { normal?: string; strong?: string }
+): ResolvedAskOptions {
+  if (!opts.mode) {
+    return {
+      model: opts.model,
+      temperature: opts.temperature,
+      maxTokens: opts.maxTokens,
+    };
+  }
+  const preset = getModePreset(opts.mode);
+  const modeForModel: "normal" | "strong" =
+    opts.mode === "weak" || opts.mode === "normal" ? "normal" : "strong";
+  const model =
+    opts.model ??
+    clientModels?.[modeForModel] ??
+    envOverrides?.[modeForModel] ??
+    preset.model;
+  return {
+    model,
+    temperature: opts.temperature ?? preset.temperature,
+    maxTokens: opts.maxTokens ?? preset.maxTokens,
+  };
 }

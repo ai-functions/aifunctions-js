@@ -5,8 +5,9 @@ import type {
   StreamChunk,
 } from "../core/types.js";
 import { NxAiApiError } from "../core/errors.js";
+import { resolveOptionsFromMode } from "../core/modePreset.js";
 import { normalizeUsage } from "../core/usage.js";
-import { getOpenRouterEnv } from "../env.js";
+import { getModelOverrides, getOpenRouterEnv } from "../env.js";
 
 type OpenRouterConfig = NonNullable<
   Extract<CreateClientOptions, { backend: "openrouter" }>["openrouter"]
@@ -97,6 +98,8 @@ export function createOpenRouterClient(
   const appUrl = openrouter.appUrl ?? env.appUrl;
   const appName = openrouter.appName ?? env.appName;
   const allowFallbacksDefault = openrouter.allowFallbacksDefault ?? true;
+  const clientModels = config.models;
+  const envOverrides = getModelOverrides();
 
   if (!apiKey) {
     throw new NxAiApiError("Missing OPENROUTER_API_KEY. Set it in .env or pass openrouter.apiKey.", {
@@ -104,15 +107,22 @@ export function createOpenRouterClient(
     });
   }
 
+  function resolveOpts(opts: AskOptions): { model: string; temperature: number; maxTokens: number } {
+    const resolved = opts.mode
+      ? resolveOptionsFromMode(opts, clientModels, envOverrides)
+      : { model: opts.model, temperature: opts.temperature, maxTokens: opts.maxTokens };
+    if (!resolved.model) {
+      throw new NxAiApiError(
+        'OpenRouter backend requires opts.model or opts.mode (e.g. mode: "strong"). Set LLM_MODEL_STRONG / LLM_MODEL_NORMAL or pass model in opts.',
+        { code: "MISSING_ENV" }
+      );
+    }
+    return { model: resolved.model, temperature: resolved.temperature, maxTokens: resolved.maxTokens };
+  }
+
   return {
     async ask(instruction: string, opts: AskOptions): Promise<AskResult> {
-      // ... (existing code omitted for brevity in summary, but I'll replace the block)
-      const model = opts.model;
-      if (!model) {
-        throw new NxAiApiError('OpenRouter backend requires opts.model (e.g. "openai/gpt-4o").', {
-          code: "MISSING_ENV",
-        });
-      }
+      const { model, temperature, maxTokens } = resolveOpts(opts);
 
       const messages: OpenRouterMessage[] = [];
       if (opts.system) {
@@ -123,8 +133,8 @@ export function createOpenRouterClient(
       const body: OpenRouterRequestBody = {
         model,
         messages,
-        temperature: opts.temperature,
-        max_completion_tokens: opts.maxTokens,
+        temperature,
+        max_completion_tokens: maxTokens,
       };
 
       if (opts.vendor !== undefined) {
@@ -199,12 +209,7 @@ export function createOpenRouterClient(
       return doFetch();
     },
     async *askStream(instruction: string, opts: AskOptions): AsyncIterable<StreamChunk> {
-      const model = opts.model;
-      if (!model) {
-        throw new NxAiApiError('OpenRouter backend requires opts.model (e.g. "openai/gpt-4o").', {
-          code: "MISSING_ENV",
-        });
-      }
+      const { model, temperature, maxTokens } = resolveOpts(opts);
       const messages: OpenRouterMessage[] = [];
       if (opts.system) {
         messages.push({ role: "system", content: opts.system });
@@ -213,8 +218,8 @@ export function createOpenRouterClient(
       const body: OpenRouterRequestBody = {
         model,
         messages,
-        temperature: opts.temperature,
-        max_completion_tokens: opts.maxTokens,
+        temperature,
+        max_completion_tokens: maxTokens,
         stream: true,
       };
       if (opts.vendor !== undefined) {

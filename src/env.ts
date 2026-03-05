@@ -1,4 +1,18 @@
 /**
+ * Reads model overrides for mode "normal" and "strong" (e.g. LLM_MODEL_NORMAL, LLM_MODEL_STRONG).
+ * When set, these override the built-in preset models so deployers can set the strong model without code changes.
+ */
+export function getModelOverrides(): {
+  normal: string | undefined;
+  strong: string | undefined;
+} {
+  return {
+    normal: process.env.LLM_MODEL_NORMAL || process.env.AI_MODEL_NORMAL,
+    strong: process.env.LLM_MODEL_STRONG || process.env.AI_MODEL_STRONG,
+  };
+}
+
+/**
  * Reads OpenRouter-related env vars. Does not throw; returns undefined for missing values.
  */
 export function getOpenRouterEnv(): {

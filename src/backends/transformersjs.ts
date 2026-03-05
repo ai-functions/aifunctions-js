@@ -1,5 +1,6 @@
 import type { AskOptions, AskResult, CreateClientOptions } from "../core/types.js";
 import { NxAiApiError } from "../core/errors.js";
+import { resolveOptionsFromMode } from "../core/modePreset.js";
 import { normalizeUsage } from "../core/usage.js";
 import { getTransformersJsEnv } from "../env.js";
 
@@ -66,12 +67,13 @@ export function createTransformersJsClient(
   return {
     async ask(instruction: string, opts: AskOptions): Promise<AskResult> {
       const pipe = await ensureLoaded();
+      const resolved = opts.mode ? resolveOptionsFromMode(opts) : opts;
       const prompt = buildPrompt(opts.system, instruction);
 
       const out = await pipe(prompt, {
-        max_new_tokens: opts.maxTokens,
-        temperature: opts.temperature,
-        do_sample: opts.temperature > 0,
+        max_new_tokens: resolved.maxTokens,
+        temperature: resolved.temperature,
+        do_sample: resolved.temperature > 0,
       });
 
       const generated = (Array.isArray(out) ? out[0] : out) as { generated_text?: string } | undefined;

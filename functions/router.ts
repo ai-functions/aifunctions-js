@@ -1,4 +1,4 @@
-import { createClient, getSkillsResolver, getSkillNamesFromContent, resolveSkillInstructions, getSkillRules, resolveSkillRules } from "../src/index.js";
+import { createClient, getSkillsResolver, getSkillNamesFromContent, getProfiles, resolveSkillInstructions, getSkillRules, resolveSkillRules } from "../src/index.js";
 import type { Client } from "../src/index.js";
 import type { ContentResolver } from "nx-content";
 import { executeSkill } from "./core/executor.js";
@@ -107,6 +107,8 @@ export type RunOptions = {
   resolver?: ContentResolver;
   /** When true and resolver is set, validate the skill result against the library index io.output schema and return { result, validation }. Never throws on validation failure; validation.valid and validation.errors indicate contract compliance. */
   validateOutput?: boolean;
+  /** Optional LLM client (e.g. BYOK). Merged into request for built-in skills; passed to runWithContent for content skills. */
+  client?: Client;
 };
 
 /** Return type when run() is called with validateOutput: true. Result is always returned; validation indicates whether it passed the contract. */
@@ -134,7 +136,10 @@ export async function run(
       rules = await getSkillRules(options.resolver, skill);
       if (rules.length === 0) rules = await resolveSkillRules(options.resolver, skill);
     }
-    result = await fn(request, { rules });
+    const req = options?.client
+      ? { ...(request as object), client: options.client }
+      : request;
+    result = await fn(req, { rules });
   } else {
     const resolver = options?.resolver ?? getSkillsResolver();
     const fromContent = await getSkillNamesFromContent(resolver);
@@ -142,7 +147,7 @@ export async function run(
       const available = [...getSkillNames(), ...fromContent];
       throw new Error(`Unknown skill: ${skill}. Available: ${available.join(", ")}`);
     }
-    result = await runWithContent(skill, request, { resolver });
+    result = await runWithContent(skill, request, { resolver, client: options?.client });
   }
   if (options?.validateOutput && options?.resolver) {
     const validation = await validateOutput(skill, result, { resolver: options.resolver });
@@ -215,8 +220,8 @@ export async function getSkillNamesAsync(
   return [...new Set([...builtIn, ...fromContent])];
 }
 
-/** Mode for content-resolved instructions (weak / normal / strong / ultra). Canonical files: weak, strong, ultra; API "normal" maps to strong. */
-export type ContentSkillMode = "weak" | "normal" | "strong" | "ultra";
+/** Mode for content-resolved instructions. Profile modes (best/cheapest/fastest/balanced) resolve from race results; weak/normal/strong/ultra use instruction files. */
+export type ContentSkillMode = "weak" | "normal" | "strong" | "ultra" | "best" | "cheapest" | "fastest" | "balanced";
 
 export type RunWithContentOptions = {
   /** Content resolver (e.g. from getSkillsResolver()). Required for runWithContent. */
@@ -227,9 +232,11 @@ export type RunWithContentOptions = {
   mode?: ContentSkillMode;
 };
 
+const PROFILE_MODES: ContentSkillMode[] = ["best", "cheapest", "fastest", "balanced"];
+
 /**
  * Run a skill by name using instructions (and optionally rules) resolved from content.
- * Uses the same executor as built-in skills for a single execution path.
+ * When mode is best/cheapest/fastest/balanced, resolves model/temperature/maxTokens from stored race profiles; fails with an actionable error if no profile exists.
  */
 export async function runWithContent(
   skillName: string,
@@ -241,9 +248,31 @@ export async function runWithContent(
   const mode: ContentSkillMode = options.mode ?? req.mode ?? "normal";
   const client = providedClient ?? createClient({ backend: "openrouter" });
 
-  const instruction = await resolveSkillInstructions(resolver, skillName, mode);
+  const instructionMode: "weak" | "normal" | "strong" = PROFILE_MODES.includes(mode) ? "normal" : mode === "weak" ? "weak" : "strong";
+  const instruction = await resolveSkillInstructions(resolver, skillName, instructionMode);
   let rules = await getSkillRules(resolver, skillName);
   if (rules.length === 0) rules = await resolveSkillRules(resolver, skillName);
+
+  if (PROFILE_MODES.includes(mode)) {
+    const { profiles } = await getProfiles(resolver, skillName);
+    const profile = profiles?.[mode as keyof typeof profiles];
+    if (!profile?.model) {
+      throw new Error(
+        `No race profile for mode "${mode}" on function "${skillName}". Run a race first (POST /race/models with functionKey) to set winner profiles.`
+      );
+    }
+    return executeSkill<unknown>({
+      request,
+      buildPrompt: (r) => `# ${skillName}\n\n` + buildRequestPrompt(r),
+      instructions: { weak: instruction, normal: instruction, strong: instruction },
+      rules,
+      client,
+      mode: "normal",
+      model: profile.model,
+      temperature: profile.temperature,
+      maxTokens: profile.maxTokens,
+    });
+  }
 
   return executeSkill<unknown>({
     request,
@@ -251,6 +280,6 @@ export async function runWithContent(
     instructions: { weak: instruction, normal: instruction, strong: instruction },
     rules,
     client,
-    mode,
+    mode: mode === "ultra" ? "strong" : (mode as "weak" | "normal" | "strong"),
   });
 }

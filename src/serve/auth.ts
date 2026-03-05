@@ -1,9 +1,9 @@
 /**
- * Optional API key auth: when AIFUNCTIONS_API_KEY is set, require x-api-key header.
+ * Optional API key auth: when LIGHT_SKILLS_API_KEY (or legacy AIFUNCTIONS_API_KEY) is set, require x-api-key header.
  */
 import type { IncomingMessage } from "node:http";
 
-const API_KEY = process.env.AIFUNCTIONS_API_KEY;
+const API_KEY = process.env.LIGHT_SKILLS_API_KEY ?? process.env.AIFUNCTIONS_API_KEY;
 
 export function requireAuth(req: IncomingMessage): { ok: true } | { ok: false; status: number; message: string } {
   if (!API_KEY || API_KEY.trim() === "") {

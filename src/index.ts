@@ -13,8 +13,8 @@ export type {
   CreateClientOptions,
   LlmMode,
 } from "./core/types.js";
-export { getModePreset } from "./core/modePreset.js";
-export type { ModePreset } from "./core/modePreset.js";
+export { getModePreset, resolveOptionsFromMode } from "./core/modePreset.js";
+export type { ModePreset, ResolvedAskOptions } from "./core/modePreset.js";
 export { NxAiApiError } from "./core/errors.js";
 export type { NxAiApiErrorCode } from "./core/errors.js";
 
@@ -37,6 +37,12 @@ export {
   skillRulesKey,
   skillInstructionsFileKey,
   skillRulesFileKey,
+  getSkillTestCases,
+  setSkillTestCases,
+  getFunctionMeta,
+  setFunctionMeta,
+  skillTestCasesKey,
+  functionMetaKey,
 } from "./content/skillsResolver.js";
 export type {
   SkillsResolverOptions,
@@ -44,7 +50,31 @@ export type {
   SkillRule,
   SkillVersionEntry,
   SetActiveVersionOptions,
+  SkillTestCase,
+  FunctionStatus,
+  FunctionMeta,
 } from "./content/skillsResolver.js";
+export {
+  getProfiles,
+  getRaceConfig,
+  setRaceConfig,
+  setProfiles,
+  setDefaults,
+  getRaces,
+  appendRace,
+  getRaceReport,
+  listRaces,
+  readRace,
+} from "./content/raceStorage.js";
+export type {
+  RaceProfile,
+  RaceProfileKey,
+  RaceConfig,
+  RaceAttempt,
+  RaceRecord,
+  GetRaceReportOptions,
+} from "./content/raceStorage.js";
+
 export {
   DEFAULT_SKILLS_REPO_URL,
   DEFAULT_SKILLS_BRANCH,

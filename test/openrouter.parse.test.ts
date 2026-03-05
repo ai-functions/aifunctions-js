@@ -82,4 +82,35 @@ describe("OpenRouter response parsing", () => {
     });
     assert.strictEqual(res.text, "");
   });
+
+  it("resolves model and preset from opts.mode when model not provided", async () => {
+    const ai = createClient({
+      backend: "openrouter",
+      openrouter: { apiKey: "test-key" },
+    });
+    await ai.ask("Hi", {
+      mode: "strong",
+      maxTokens: 100,
+      temperature: 0.5,
+    });
+    const body = lastBody as { model: string; temperature: number; max_completion_tokens: number };
+    assert.strictEqual(body.model, "gpt-5.2", "strong mode uses preset model gpt-5.2");
+    assert.strictEqual(body.temperature, 0.5, "explicit temperature overrides preset");
+    assert.strictEqual(body.max_completion_tokens, 100, "explicit maxTokens overrides preset");
+  });
+
+  it("uses client models config over preset when provided", async () => {
+    const ai = createClient({
+      backend: "openrouter",
+      openrouter: { apiKey: "test-key" },
+      models: { strong: "anthropic/claude-3-5-sonnet" },
+    });
+    await ai.ask("Hi", {
+      mode: "strong",
+      maxTokens: 512,
+      temperature: 0.3,
+    });
+    const body = lastBody as { model: string };
+    assert.strictEqual(body.model, "anthropic/claude-3-5-sonnet");
+  });
 });
