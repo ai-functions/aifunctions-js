@@ -265,7 +265,7 @@ TRANSFORMERS_JS_MODEL_ID=Xenova/distilbart-cnn-6-6
 
 ## REST API (optional, stateless)
 
-Expose skills and the full functions lifecycle over HTTP.
+Expose skills and the full functions lifecycle over HTTP. Authoritative request/response shapes: [docs/API_CONTRACT.md](docs/API_CONTRACT.md). Server–contract sync status: [docs/CONTRACT_SYNC.md](docs/CONTRACT_SYNC.md).
 
 ```bash
 npm run build && npm run serve
@@ -281,9 +281,10 @@ npm run build && npm run serve
 
 If `LIGHT_SKILLS_API_KEY` is not set, all requests are allowed.
 
-### Run
+### Run and health
 
 ```
+GET  /health                  health check → { version, uptime, skills, hasOpenrouterKey, backends }
 POST /run                     { skill, input, options } → { result, usage }
 POST /skills/:name/run        { input, options }        → { result, usage }
 POST /functions/:id/run       { input, options }        → { result, usage }
@@ -292,6 +293,8 @@ GET  /skills/:name            skill detail
 GET  /functions               list functions
 GET  /functions/:id           function detail with status, version, last validation
 ```
+
+Run `mode` may be `weak`, `normal`, `strong`, `ultra`, or profile modes `best`, `cheapest`, `fastest`, `balanced`. Profile modes require a race to have been run first; otherwise the server returns `422` `NO_RACE_PROFILE`.
 
 ### Functions lifecycle
 
@@ -308,6 +311,16 @@ GET  /functions/:id/test-cases
 PUT  /functions/:id/test-cases  { testCases: [{ id, input, expectedOutput? }] }
 ```
 
+### Race / benchmark
+
+```
+POST /race/models              race models or temperatures (async job) — body: skillName|prompt, testCases?, candidates|models, functionKey?, applyDefaults?, raceLabel?, notes?, type?, model?, temperatures?
+GET  /functions/:id/profiles   race winner profiles and defaults → { defaults, profiles: { best, cheapest, fastest, balanced } }
+GET  /functions/:id/race-report  race history — query: last, since, raceId → { races }
+```
+
+Job result for a race includes `ranked`, `raw`, `winners`, `usage`. Run with `mode: best|cheapest|fastest|balanced` uses the stored profile for that function.
+
 ### Optimization endpoints
 
 ```
@@ -315,8 +328,8 @@ POST /optimize/generate       generate instructions from test cases (async job)
 POST /optimize/judge          score a response against rules → { pass, score, ruleResults }
 POST /optimize/rules          generate rules from labeled examples or instructions
 POST /optimize/rules-optimize optimize existing rules from examples with rationale (append/replace)
-POST /optimize/fix            fix instructions from judge feedback → { fixedInstructions, changes }
-POST /optimize/compare        rank 2+ responses by quality → { ranking, bestId }
+POST /optimize/fix            fix instructions from judge feedback → { fixedInstructions, changes, summary, usage, optional addedRuleBullets }
+POST /optimize/compare        rank 2+ responses by quality → { ranking, bestId, candidates }
 POST /optimize/instructions   one-shot instruction rewrite
 POST /optimize/skill          rewrite one skill's instructions in-place
 POST /optimize/batch          batch rewrite (async job)

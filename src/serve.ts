@@ -211,6 +211,8 @@ async function handleRun(
     const message = e instanceof Error ? e.message : String(e);
     if (message.includes("Unknown skill")) {
       sendError(res, 404, `Skill '${skill.trim()}' not found`, "SKILL_NOT_FOUND");
+    } else if (message.includes("No race profile") || message.includes("Run a race first")) {
+      sendError(res, 422, message, "NO_RACE_PROFILE");
     } else {
       sendError(res, 500, message, "RUN_ERROR");
     }
