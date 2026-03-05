@@ -34,7 +34,7 @@ export type RaceAttempt = {
 
 export type RaceRecord = {
   raceId: string;
-  type: "model" | "temperature";
+  type: "model" | "temperature" | "tokens";
   label?: string;
   notes?: string;
   applyDefaults: boolean;

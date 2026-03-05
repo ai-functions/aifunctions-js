@@ -289,13 +289,14 @@ If `LIGHT_SKILLS_API_KEY` is not set, all requests are allowed.
 
 ```
 GET  /health                  health check → { version, uptime, skills, hasOpenrouterKey, backends }
+GET  /config/modes            server mode→model mapping → { weak, normal, strong, ultra } (each { model, description })
 POST /run                     { skill, input, options } → { result, usage }
 POST /skills/:name/run        { input, options }        → { result, usage }
 POST /functions/:id/run       { input, options }        → { result, usage }
 GET  /skills                  list skills + metadata
 GET  /skills/:name            skill detail
 GET  /functions               list functions
-GET  /functions/:id           function detail with status, version, last validation
+GET  /functions/:id           function detail with status, version, last validation, currentInstructions, currentRules, currentRulesCount
 ```
 
 Run `mode` may be `weak`, `normal`, `strong`, `ultra`, or profile modes `best`, `cheapest`, `fastest`, `balanced`. Profile modes require a race to have been run first; otherwise the server returns `422` `NO_RACE_PROFILE`.
@@ -313,12 +314,14 @@ POST /functions/:id:push      push to remote git repo (requires SKILLS_LOCAL_PAT
 GET  /functions/:id/versions  instruction version history
 GET  /functions/:id/test-cases
 PUT  /functions/:id/test-cases  { testCases: [{ id, input, expectedOutput? }] }
+POST /functions/:id/save-optimization  persist instructions, rules, examples from optimization wizard
+POST /functions/generate-examples      { description, count?, mode? } → { examples, usage? }
 ```
 
 ### Race / benchmark
 
 ```
-POST /race/models              race models or temperatures (async job) — body: skillName|prompt, testCases?, candidates|models, functionKey?, applyDefaults?, raceLabel?, notes?, type?, model?, temperatures?
+POST /race/models              race models, temperatures, or tokens (async job) — body: skillName|prompt, testCases?, candidates|models, functionKey?, applyDefaults?, raceLabel?, notes?, type? (model|temperature|tokens), model?, temperatures?, tokenValues?
 GET  /functions/:id/profiles   race winner profiles and defaults → { defaults, profiles: { best, cheapest, fastest, balanced } }
 GET  /functions/:id/race-report  race history — query: last, since, raceId → { races }
 ```
@@ -427,8 +430,10 @@ The package itself remains **stateless** — it does not store usage history. Th
 Proxy endpoints that fetch usage and cost data directly from the upstream provider. No data is stored by this server.
 
 ```
-GET /analytics/openrouter/credits      account balance and total usage
-GET /analytics/openrouter/generations  generation records (query: dateMin, dateMax, model, userTag, limit)
+GET /models/available                 list models available via OpenRouter (x-openrouter-key or OPENROUTER_API_KEY)
+GET /activity                         server-side activity log (query: from, to, functionId, projectId, model, limit) → { activities, summary }
+GET /analytics/openrouter/credits     account balance and total usage
+GET /analytics/openrouter/generations generation records (query: dateMin, dateMax, model, userTag, limit)
 GET /analytics/openai/usage            org usage buckets — requires OPENAI_ADMIN_KEY (query: startTime, endTime, groupBy, projectIds, models, limit)
 GET /analytics/openai/costs            org cost buckets  — requires OPENAI_ADMIN_KEY (query: startTime, endTime, groupBy, projectIds, limit)
 ```

@@ -1,6 +1,6 @@
 {
-  "name": "aifunctions",
-  "version": "2.4.0",
+  "name": "aifunctions-js",
+  "version": "2.5.0",
   "description": "Minimal ask() API for remote (OpenRouter) and local (llama.cpp / Transformers.js) LLMs",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -38,7 +38,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test --ext .ts",
     "test": "node --test test/**/*.test.ts",
-    "test:unit": "node --test test/ai.ask.test.ts test/askJson.test.ts test/content.libraryIndex.test.ts test/content.skillsResolver.test.ts test/functions.callAI.test.ts test/functions.router.test.ts test/jsonHelpers.test.ts test/openrouter.parse.test.ts test/openrouter.request.test.ts test/parseJsonResponse.test.ts test/runJsonCompletion.test.ts test/safeJsonParse.test.ts test/serve.attribution.test.ts test/serve.usageTracker.test.ts test/validateJson.test.ts",
+    "test:unit": "node --test test/ai.ask.test.ts test/askJson.test.ts test/content.libraryIndex.test.ts test/content.skillsResolver.test.ts test/functions.callAI.test.ts test/functions.router.test.ts test/jsonHelpers.test.ts test/openrouter.parse.test.ts test/openrouter.request.test.ts test/parseJsonResponse.test.ts test/runJsonCompletion.test.ts test/safeJsonParse.test.ts test/serve.activityLog.test.ts test/serve.attribution.test.ts test/serve.usageTracker.test.ts test/validateJson.test.ts",
     "test:live:one": "node --test test/library.live.test.ts --test-name-pattern",
     "content:sync": "npm run build && tsx scripts/testOptimizeAndPush.ts",
     "content:sync:optimize": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --optimize",

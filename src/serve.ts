@@ -26,6 +26,7 @@ import {
   setDefaults,
   getProfiles,
   getRaceReport,
+  resolveSkillInstructions,
 } from "./index.js";
 import type { RaceRecord, RaceProfile } from "./content/raceStorage.js";
 import {
@@ -62,11 +63,13 @@ import {
 import {
   fetchOpenRouterCredits,
   fetchOpenRouterGenerations,
+  fetchOpenRouterModels,
 } from "./serve/analyticsOpenRouter.js";
 import {
   fetchOpenAIUsage,
   fetchOpenAICosts,
 } from "./serve/analyticsOpenAI.js";
+import { appendActivity, queryActivity } from "./serve/activityLog.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -207,6 +210,21 @@ async function handleRun(
       run(skill.trim(), request ?? {}, { resolver, validateOutput, client })
     );
     const usage = tracker ? toUsageResponse(tracker.getUsage()) : null;
+    if (tracker) {
+      const u = tracker.getUsage();
+      if (u.callCount > 0) {
+        appendActivity({
+          functionId: skill.trim(),
+          model: u.model ?? null,
+          projectId: attribution?.projectId,
+          traceId: attribution?.traceId,
+          tokens: { prompt: u.promptTokens, completion: u.completionTokens, total: u.totalTokens },
+          cost: u.estimatedCost ?? null,
+          latencyMs: u.latencyMs,
+          status: "success",
+        });
+      }
+    }
 
     if (validateOutput && typeof out === "object" && out !== null && "validation" in out) {
       const { result, validation } = out as { result: unknown; validation: { valid: boolean; errors?: string[] } };
@@ -693,7 +711,7 @@ async function handleOptimizeGenerate(
 async function handleRaceModels(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
   if (body == null || typeof body !== "object") { sendError(res, 400, "Body must be RaceModelsRequest object", "INVALID_INPUT"); return; }
   const b = body as {
-    type?: "model" | "temperature";
+    type?: "model" | "temperature" | "tokens";
     taskName?: string;
     call?: "ask" | "askJson";
     skill?: { strongSystem: string; weakSystem?: string };
@@ -703,13 +721,15 @@ async function handleRaceModels(res: import("node:http").ServerResponse, body: u
     models?: Array<{ id: string; model: string; vendor?: string | string[]; class: "weak" | "normal" | "strong"; options?: { maxTokens?: number; temperature?: number; timeoutMs?: number } }>;
     model?: string;
     temperatures?: number[];
+    tokenValues?: number[];
+    temperature?: number;
     functionKey?: string;
     applyDefaults?: boolean;
     raceLabel?: string;
     notes?: string;
   };
   let request = body as Parameters<typeof raceModels>[0];
-  let raceType: "model" | "temperature" = "model";
+  let raceType: "model" | "temperature" | "tokens" = "model";
   if (b.type === "temperature" && typeof b.model === "string" && Array.isArray(b.temperatures) && b.temperatures.length > 0) {
     raceType = "temperature";
     const testCases = (b.testCases ?? []).map((tc) => ({ id: tc.id, inputMd: (tc as { inputMd?: string }).inputMd ?? toInputMd((tc as { input?: unknown }).input) }));
@@ -726,6 +746,36 @@ async function handleRaceModels(res: import("node:http").ServerResponse, body: u
     const skillSystem = b.skill?.strongSystem ?? (b.functionKey ? "" : "Follow the user request.");
     request = {
       taskName: b.taskName ?? "temperature-race",
+      call: b.call ?? "ask",
+      skill: { strongSystem: skillSystem || "Follow the user request." },
+      testCases: testCases.length ? testCases : [{ id: "cal", inputMd: "Calibrate." }],
+      judgeRules: b.judgeRules,
+      threshold: b.threshold ?? 0.8,
+      models,
+      client: (body as { client?: unknown }).client,
+    } as Parameters<typeof raceModels>[0];
+    if (b.functionKey?.trim() && !request.skill.strongSystem) {
+      const resolver = getSkillsResolver();
+      request.skill.strongSystem = await getSkillInstructions(resolver, b.functionKey.trim()) || "Follow the user request.";
+      (request as { judgeRules?: JudgeRule[] }).judgeRules = await getSkillRules(resolver, b.functionKey.trim());
+    }
+  }
+  if (b.type === "tokens" && typeof b.model === "string" && Array.isArray(b.tokenValues) && b.tokenValues.length > 0) {
+    raceType = "tokens";
+    const testCases = (b.testCases ?? []).map((tc) => ({ id: tc.id, inputMd: (tc as { inputMd?: string }).inputMd ?? toInputMd((tc as { input?: unknown }).input) }));
+    if (!testCases.length && b.functionKey) {
+      sendError(res, 400, "testCases required for tokens race", "INVALID_INPUT");
+      return;
+    }
+    const models = b.tokenValues.map((maxTok) => ({
+      id: `tokens-${maxTok}`,
+      model: b.model!,
+      class: "normal" as const,
+      options: { maxTokens: maxTok, temperature: b.temperature ?? 0.3 },
+    }));
+    const skillSystem = b.skill?.strongSystem ?? (b.functionKey ? "" : "Follow the user request.");
+    request = {
+      taskName: b.taskName ?? "tokens-race",
       call: b.call ?? "ask",
       skill: { strongSystem: skillSystem || "Follow the user request." },
       testCases: testCases.length ? testCases : [{ id: "cal", inputMd: "Calibrate." }],
@@ -906,6 +956,52 @@ async function handleCreateFunction(res: import("node:http").ServerResponse, bod
   }
 }
 
+const MODE_DESCRIPTIONS: Record<string, string> = {
+  weak: "Local or cheap",
+  normal: "Mid-tier",
+  strong: "High-quality cloud",
+  ultra: "Best available",
+};
+
+async function handleActivity(
+  res: import("node:http").ServerResponse,
+  query: Record<string, string | undefined>
+): Promise<void> {
+  const from = query.from;
+  const to = query.to;
+  const functionId = query.functionId;
+  const projectId = query.projectId;
+  const model = query.model;
+  const limit = query.limit ? Math.min(1000, Math.max(1, Number(query.limit))) : 100;
+  const { activities, summary } = queryActivity({
+    from,
+    to,
+    functionId,
+    projectId,
+    model,
+    limit,
+  });
+  sendOk(res, { activities, summary });
+}
+
+async function handleConfigModes(res: import("node:http").ServerResponse): Promise<void> {
+  const overrides = getModelOverrides();
+  const modes = ["weak", "normal", "strong", "ultra"] as const;
+  const data: Record<string, { model: string; description: string }> = {};
+  for (const mode of modes) {
+    const preset = getModePreset(mode);
+    let model: string;
+    if (preset.backend === "llama-cpp") {
+      model = "local";
+    } else {
+      const modeForModel = mode === "weak" || mode === "normal" ? "normal" : "strong";
+      model = overrides[modeForModel] ?? preset.model ?? "openrouter/default";
+    }
+    data[mode] = { model, description: MODE_DESCRIPTIONS[mode] ?? mode };
+  }
+  sendOk(res, data);
+}
+
 async function handleGetFunction(res: import("node:http").ServerResponse, name: string): Promise<void> {
   const resolver = getSkillsResolver();
   try {
@@ -913,6 +1009,12 @@ async function handleGetFunction(res: import("node:http").ServerResponse, name: 
     if (!allNames.includes(name)) { sendError(res, 404, `Function '${name}' not found`, "FUNCTION_NOT_FOUND"); return; }
     const instructions = await getSkillInstructions(resolver, name);
     const meta = await getFunctionMeta(resolver, name);
+    const [weakInst, strongInst, ultraInst] = await Promise.all([
+      resolveSkillInstructions(resolver, name, "weak").catch(() => ""),
+      resolveSkillInstructions(resolver, name, "strong").catch(() => ""),
+      resolveSkillInstructions(resolver, name, "ultra").catch(() => ""),
+    ]);
+    const currentRules = await getSkillRules(resolver, name);
     sendOk(res, {
       id: name,
       instructions,
@@ -921,9 +1023,139 @@ async function handleGetFunction(res: import("node:http").ServerResponse, name: 
       releasedAt: meta.releasedAt,
       lastValidation: meta.lastValidation,
       scoreGate: meta.scoreGate,
+      currentInstructions: { weak: weakInst, strong: strongInst, ultra: ultraInst },
+      currentRules,
+      currentRulesCount: currentRules.length,
     });
   } catch (e) {
     sendError(res, 500, e instanceof Error ? e.message : String(e), "GET_FUNCTION_ERROR");
+  }
+}
+
+/** Extract JSON array from model response; handles optional markdown code fence. */
+function parseGenerateExamplesResponse(text: string): Array<{ input?: unknown; goodOutput?: unknown; goodRationale?: string; badOutput?: unknown; badRationale?: string }> {
+  let raw = text.trim();
+  const codeMatch = raw.match(/^```(?:json)?\s*([\s\S]*?)```$/m);
+  if (codeMatch) raw = codeMatch[1]!.trim();
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null);
+}
+
+async function handleGenerateExamples(
+  res: import("node:http").ServerResponse,
+  body: unknown,
+  req: import("node:http").IncomingMessage
+): Promise<void> {
+  const b = body as { description?: string; count?: number; mode?: "weak" | "normal" | "strong" | "ultra" };
+  if (typeof b?.description !== "string" || !b.description.trim()) {
+    sendError(res, 400, "description is required", "INVALID_INPUT");
+    return;
+  }
+  const count = Math.min(10, Math.max(1, Number(b?.count) || 5));
+  const mode = b?.mode ?? "strong";
+  const prompt = `You are helping create training examples for an AI function. Given this description, generate exactly ${count} diverse examples. Each example must have:
+- input: an object (e.g. { "text": "..." } or similar) representing one input case
+- goodOutput: the correct/ideal output for that input
+- goodRationale: one sentence why this output is correct
+- badOutput: an incorrect or suboptimal output for the same input
+- badRationale: one sentence why this output is wrong or worse
+
+Description: ${b.description.trim()}
+
+Return a JSON array of ${count} objects, each with keys: input, goodOutput, goodRationale, badOutput, badRationale. No other commentary.`;
+  const attribution = extractAttribution(body, "generate-examples");
+  const tracker = makeTrackedClient(req, attribution);
+  try {
+    const preset = getModePreset(mode);
+    const overrides = getModelOverrides();
+    const modeForModel = mode === "weak" || mode === "normal" ? "normal" : "strong";
+    const model = overrides[modeForModel] ?? preset.model;
+    if (!model || preset.backend === "llama-cpp") {
+      sendError(res, 422, "generate-examples requires OpenRouter (set mode to normal/strong/ultra or set LLM_MODEL_STRONG)", "UNSUPPORTED_MODE");
+      return;
+    }
+    const result = await concurrencyGuard(() =>
+      tracker.client.ask(prompt, {
+        model,
+        temperature: 0.3,
+        maxTokens: 4096,
+      })
+    );
+    const examples = parseGenerateExamplesResponse(result.text);
+    const usage = toUsageResponse(tracker.getUsage());
+    sendOk(res, { examples, usage });
+  } catch (e) {
+    if (e instanceof SyntaxError) {
+      sendError(res, 502, "Model response was not valid JSON", "INVALID_RESPONSE");
+      return;
+    }
+    const err = e as { code?: string; status?: number };
+    if (err.code === "QUEUE_FULL" && err.status === 503) {
+      sendError(res, 503, "Server busy; retry later", "QUEUE_FULL");
+      return;
+    }
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "GENERATE_EXAMPLES_ERROR");
+  }
+}
+
+async function handleSaveOptimization(
+  res: import("node:http").ServerResponse,
+  body: unknown,
+  id: string
+): Promise<void> {
+  const b = body as {
+    instructions?: string;
+    rules?: Array<{ rule: string; weight: number }>;
+    examples?: Array<{ id?: string; input?: unknown; output?: unknown; label?: string; rationale?: string }>;
+  };
+  const hasInstructions = typeof b?.instructions === "string";
+  const hasRules = Array.isArray(b?.rules) && b.rules.length > 0;
+  const hasExamples = Array.isArray(b?.examples) && b.examples.length > 0;
+  if (!hasInstructions && !hasRules && !hasExamples) {
+    sendError(res, 400, "At least one of instructions, rules, or examples is required", "INVALID_INPUT");
+    return;
+  }
+  const resolver = getSkillsResolver();
+  const names = await getSkillNamesAsync(resolver);
+  if (!names.includes(id)) {
+    sendError(res, 404, `Function '${id}' not found`, "FUNCTION_NOT_FOUND");
+    return;
+  }
+  try {
+    let instructionsLength: number | undefined;
+    let rulesCount: number | undefined;
+    let examplesCount: number | undefined;
+    if (hasInstructions) {
+      await setSkillInstructions(resolver, id, b.instructions!);
+      instructionsLength = b.instructions!.length;
+    }
+    if (hasRules) {
+      await setSkillRules(resolver, id, b.rules!);
+      rulesCount = b.rules!.length;
+    }
+    if (hasExamples) {
+      const testCases = b.examples!.map((ex, i) => ({
+        id: typeof ex.id === "string" ? ex.id : `ex-${i + 1}`,
+        inputMd: typeof ex.input === "string" ? ex.input : JSON.stringify(ex.input ?? {}, null, 2),
+        expectedOutputMd:
+          ex.output != null
+            ? typeof ex.output === "string"
+              ? ex.output
+              : JSON.stringify(ex.output, null, 2)
+            : undefined,
+      }));
+      await setSkillTestCases(resolver, id, testCases);
+      examplesCount = testCases.length;
+    }
+    sendOk(res, {
+      saved: true,
+      ...(instructionsLength !== undefined && { instructionsLength }),
+      ...(rulesCount !== undefined && { rulesCount }),
+      ...(examplesCount !== undefined && { examplesCount }),
+    });
+  } catch (e) {
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "SAVE_OPTIMIZATION_ERROR");
   }
 }
 
@@ -1164,6 +1396,7 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
       name: "aifunctions", version: "2.2.0",
       endpoints: {
         "GET /health": "Health check",
+        "GET /config/modes": "Server mode→model mapping (weak, normal, strong, ultra)",
         "GET /skills": "List skills", "GET /skills/:name": "Skill detail",
         "POST /skills/:name/run": "Run skill",
         "POST /run": "Run skill (body: { skill, input, options })",
@@ -1177,9 +1410,12 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
         "POST /optimize/compare": "Compare 2+ responses by quality",
         "POST /optimize/generate": "Generate instructions from test cases (job)",
         "POST /race/models": "Race models (job)",
+        "GET /models/available": "List models available via OpenRouter",
+        "GET /activity": "Server-side activity log (query: from, to, functionId, projectId, model, limit)",
         "POST /content/sync": "Content sync", "POST /content/index": "Build library index",
         "POST /content/fixtures": "Run fixtures", "POST /content/layout-lint": "Layout lint",
         "GET /functions": "List functions", "POST /functions": "Create function",
+        "POST /functions/generate-examples": "Generate good/bad examples from description",
         "GET /functions/:id": "Function detail",
         "POST /functions/:id/run": "Run function",
         "POST /functions/:id:optimize": "Optimize function instructions (job)",
@@ -1191,6 +1427,7 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
         "GET /functions/:id/race-report": "Race history (query: last, since, raceId)",
         "GET /functions/:id/test-cases": "Get test cases",
         "PUT /functions/:id/test-cases": "Set test cases",
+        "POST /functions/:id/save-optimization": "Save optimization results (instructions, rules, examples)",
         "GET /jobs": "List jobs", "GET /jobs/:id": "Job status", "GET /jobs/:id/logs": "Job logs",
         "GET /analytics/openrouter/credits": "OpenRouter account balance and usage",
         "GET /analytics/openrouter/generations": "OpenRouter generation records (query: dateMin, dateMax, model, userTag, limit)",
@@ -1198,6 +1435,35 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
         "GET /analytics/openai/costs": "OpenAI org cost buckets — requires OPENAI_ADMIN_KEY (query: startTime, endTime, groupBy, projectIds, limit)",
       },
     });
+    return;
+  }
+
+  // --- /config/modes ---
+  if (pathStr === "/config/modes" && method === "GET") {
+    await handleConfigModes(res);
+    return;
+  }
+
+  // --- /models/available ---
+  if (pathStr === "/models/available" && method === "GET") {
+    try {
+      const byokKey = extractByokKey(req);
+      const apiKey = byokKey ?? process.env.OPENROUTER_API_KEY?.trim();
+      if (!apiKey) {
+        sendError(res, 422, "Provide x-openrouter-key header or set OPENROUTER_API_KEY", "MISSING_ENV");
+        return;
+      }
+      const result = await fetchOpenRouterModels(apiKey);
+      sendOk(res, result);
+    } catch (e) {
+      sendError(res, 502, e instanceof Error ? e.message : String(e), "ANALYTICS_ERROR");
+    }
+    return;
+  }
+
+  // --- /activity ---
+  if (pathStr === "/activity" && method === "GET") {
+    await handleActivity(res, query as Record<string, string | undefined>);
     return;
   }
 
@@ -1283,6 +1549,11 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
       catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
       return;
     }
+    if (pathStr === "/functions/generate-examples" && method === "POST") {
+      try { const body = await readJsonBody(req); await handleGenerateExamples(res, body, req); }
+      catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+      return;
+    }
 
     if (fnSegment) {
       // Colon-action routes: /functions/myId:validate, :release, :push, :optimize
@@ -1316,6 +1587,11 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
         if (method === "GET" && sub === "test-cases") { await handleGetFunctionTestCases(res, fnSegment); return; }
         if (method === "PUT" && sub === "test-cases") {
           try { const body = await readJsonBody(req); await handlePutFunctionTestCases(res, body, fnSegment); }
+          catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+          return;
+        }
+        if (method === "POST" && sub === "save-optimization") {
+          try { const body = await readJsonBody(req); await handleSaveOptimization(res, body, fnSegment); }
           catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
           return;
         }

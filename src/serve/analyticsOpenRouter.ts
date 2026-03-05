@@ -102,3 +102,46 @@ export async function fetchOpenRouterGenerations(
     raw,
   };
 }
+
+export type OpenRouterModelEntry = {
+  id: string;
+  name: string;
+  vendor?: string;
+  contextLength?: number;
+  pricing?: { prompt: number; completion: number };
+};
+
+/**
+ * Fetch list of available models from OpenRouter.
+ * Maps OpenRouter response to a stable shape: id, name, vendor, contextLength, pricing.
+ */
+export async function fetchOpenRouterModels(apiKey: string): Promise<{ models: OpenRouterModelEntry[] }> {
+  const res = await fetch(`${OPENROUTER_BASE}/models`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`OpenRouter /models failed: ${res.status} ${res.statusText} — ${text}`);
+  }
+  const raw = await res.json() as { data?: unknown[] };
+  const list = Array.isArray(raw?.data) ? raw.data : [];
+  const models: OpenRouterModelEntry[] = list.map((m: unknown) => {
+    const o = m as Record<string, unknown>;
+    const id = typeof o.id === "string" ? o.id : String(o.id ?? "");
+    const name = typeof o.name === "string" ? o.name : id;
+    const vendor = typeof o.organization_id === "string" ? o.organization_id : undefined;
+    const ctx = (o as { context_length?: number }).context_length;
+    const contextLength = typeof ctx === "number" ? ctx : undefined;
+    const pricingRaw = o.pricing as Record<string, unknown> | undefined;
+    let pricing: { prompt: number; completion: number } | undefined;
+    if (pricingRaw && typeof pricingRaw === "object") {
+      const prompt = (pricingRaw.prompt_per_token ?? pricingRaw.prompt) as number | undefined;
+      const completion = (pricingRaw.completion_per_token ?? pricingRaw.completion) as number | undefined;
+      if (typeof prompt === "number" && typeof completion === "number") {
+        pricing = { prompt, completion };
+      }
+    }
+    return { id, name, vendor, contextLength, pricing };
+  });
+  return { models };
+}
