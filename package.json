@@ -46,6 +46,7 @@
     "content:sync:no-test": "npm run build && tsx scripts/testOptimizeAndPush.ts -- --skip-tests",
     "content:index": "npm run build && tsx scripts/updateLibraryIndex.ts",
     "content:index:dry": "npm run build && tsx scripts/updateLibraryIndex.ts -- --dry-run",
+    "content:index:commit": "scripts/commitContentIndex.sh",
     "content:fixtures": "tsx scripts/runFixtures.ts",
     "content:layout-lint": "tsx scripts/lintContentLayout.ts",
     "serve": "node dist/src/serve.js"

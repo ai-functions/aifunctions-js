@@ -59,3 +59,14 @@ So:
 | API to get it? | No single “download full library JSON” endpoint. Use **GET /functions** for a list with descriptions and I/O; use **GET /functions/:id** for the full per-skill description. To get the exact index files, read them from the content store. |
 
 For index schema details, LLM usage, and validation, see [skills-index.v1.md](skills-index.v1.md).
+
+## Getting the index into git (content repo)
+
+The index is written under `.content/` (e.g. `skills/index.v1.json`, `skills/index/v1/*.json`). In this repo, `.content/` is gitignored. If your content lives in a **separate git repo** (e.g. `.content` is a clone or submodule), commit the updated index there after building:
+
+```bash
+npm run content:index        # build the index (writes into .content)
+npm run content:index:commit # in .content: git add index files and commit
+```
+
+`content:index:commit` only runs if `.content` is a git repo and `skills/index.v1.json` exists; otherwise it exits with a short message.
