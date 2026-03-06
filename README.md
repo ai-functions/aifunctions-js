@@ -292,12 +292,14 @@ GET  /health                  health check → { version, uptime, skills, hasOpe
 GET  /config/modes            server mode→model mapping → { weak, normal, strong, ultra } (each { model, description })
 POST /run                     { skill, input, options } → { result, usage }
 POST /skills/:name/run        { input, options }        → { result, usage }
-POST /functions/:id/run       { input, options }        → { result, usage }
+POST /functions/:id/run       { input, options }        → { result, usage, requestId, draft?, trace? }
 GET  /skills                  list skills + metadata
 GET  /skills/:name            skill detail
 GET  /functions               list functions
 GET  /functions/:id           function detail with status, version, last validation, currentInstructions, currentRules, currentRulesCount
 ```
+
+Run responses include `requestId` (same as attribution `traceId` when provided). When the function is in draft status, the response includes `draft: true`. Pass `options.trace: true` in the run body to receive a `trace` object with the full prompt(s), model selection, and model used per call (for that request only; not stored). Run endpoints are rate-limited per key (see `RATE_LIMIT_PER_MINUTE`) and return `X-RateLimit-Remaining` and `X-RateLimit-Reset` headers.
 
 Run `mode` may be `weak`, `normal`, `strong`, `ultra`, or profile modes `best`, `cheapest`, `fastest`, `balanced`. Profile modes require a race to have been run first; otherwise the server returns `422` `NO_RACE_PROFILE`.
 
@@ -309,9 +311,11 @@ Create a function, iterate on it, validate quality, then release it to a stable 
 POST /functions               create: { id, seedInstructions, scoreGate?, rules? }
 POST /functions/:id:validate  run schema + semantic scoring → { passed, scoreNormalized, cases }
 POST /functions/:id:release   promote to released (blocked if score < scoreGate)
+POST /functions/:id:rollback  set current instructions/rules to a previous version (body: `{ version: gitRef }`; requires version APIs)
 POST /functions/:id:optimize  rewrite instructions in-place
 POST /functions/:id:push      push to remote git repo (requires SKILLS_LOCAL_PATH)
-GET  /functions/:id/versions  instruction version history
+GET  /functions/:id/versions instruction version history (git shas)
+POST /functions/:id/versions/:version/run  run at a pinned version (ref = git sha from versions list)
 GET  /functions/:id/test-cases
 PUT  /functions/:id/test-cases  { testCases: [{ id, input, expectedOutput? }] }
 POST /functions/:id/save-optimization  persist instructions, rules, examples from optimization wizard
@@ -460,10 +464,13 @@ The `userTag` filter matches the attribution tag this package injects into the O
 | `LIGHT_SKILLS_API_KEY` | — | If set, requires `x-api-key` header |
 | `OPENROUTER_API_KEY` | — | Default OpenRouter key (overridden per-request by `x-openrouter-key`) |
 | `MAX_CONCURRENCY` | `10` | Max parallel LLM calls |
+| `RATE_LIMIT_PER_MINUTE` | `60` | Max run requests per minute per key (BYOK or server); responses include `X-RateLimit-Remaining`, `X-RateLimit-Reset` |
 | `JOB_TTL` | `3600` | Seconds before completed jobs are cleaned up |
 | `VALIDATE_SKILL_OUTPUT` | `0` | If `1`, all runs include schema validation |
 | `SKILLS_LOCAL_PATH` | — | Local git path, required for `:push` endpoint |
 | `OPENAI_ADMIN_KEY` | — | Admin-scoped OpenAI key, required for `GET /analytics/openai/*` |
+
+Run endpoints enforce a 100KB max request body (413 when exceeded). Backend default timeout per LLM call is 60s; for a 120s run timeout (e.g. aifunction.dev free tier) configure your backend or client.
 
 ---
 

@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import {
   getSkillsResolver,
   getLibraryIndex,
@@ -20,6 +21,10 @@ import {
   getFunctionMeta,
   setFunctionMeta,
   getSkillInstructionVersions,
+  getSkillInstructionsAtRef,
+  getSkillRulesAtRef,
+  setSkillInstructionsActiveVersion,
+  setSkillRulesActiveVersion,
   pushSkillsContent,
   appendRace,
   setProfiles,
@@ -41,6 +46,8 @@ import {
   fixInstructions,
   compare,
   generateInstructions,
+  executeSkill,
+  buildRequestPrompt,
   type JudgeRule,
 } from "../functions/index.js";
 import { runFixtures } from "./content/runFixtures.js";
@@ -70,6 +77,7 @@ import {
   fetchOpenAICosts,
 } from "./serve/analyticsOpenAI.js";
 import { appendActivity, queryActivity } from "./serve/activityLog.js";
+import { getRateLimitKey, consumeRateLimit, rateLimitHeaders, type RateLimitResult } from "./serve/rateLimit.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -87,10 +95,28 @@ const concurrencyGuard = <T>(fn: () => Promise<T>): Promise<T> => {
   });
 };
 
+const MAX_BODY_SIZE = 100 * 1024; // 100KB per aifunction.dev free tier
+
 function readJsonBody(req: import("node:http").IncomingMessage): Promise<unknown> {
+  const contentLength = req.headers["content-length"];
+  if (contentLength !== undefined) {
+    const n = parseInt(contentLength, 10);
+    if (!Number.isNaN(n) && n > MAX_BODY_SIZE) {
+      return Promise.reject(Object.assign(new Error("Request body too large"), { status: 413, code: "PAYLOAD_TOO_LARGE" }));
+    }
+  }
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(chunk));
+    let total = 0;
+    req.on("data", (chunk: Buffer) => {
+      total += chunk.length;
+      if (total > MAX_BODY_SIZE) {
+        req.destroy();
+        reject(Object.assign(new Error("Request body too large"), { status: 413, code: "PAYLOAD_TOO_LARGE" }));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => {
       const body = Buffer.concat(chunks).toString("utf8");
       if (!body.trim()) { resolve(undefined); return; }
@@ -107,13 +133,13 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
 };
 
-function sendOk(res: import("node:http").ServerResponse, data: unknown) {
-  res.writeHead(200, { "Content-Type": "application/json", ...CORS_HEADERS });
+function sendOk(res: import("node:http").ServerResponse, data: unknown, extraHeaders?: Record<string, string>) {
+  res.writeHead(200, { "Content-Type": "application/json", ...CORS_HEADERS, ...extraHeaders });
   res.end(JSON.stringify({ ok: true, data }));
 }
 
-function sendError(res: import("node:http").ServerResponse, status: number, message: string, code: string) {
-  res.writeHead(status, { "Content-Type": "application/json", ...CORS_HEADERS });
+function sendError(res: import("node:http").ServerResponse, status: number, message: string, code: string, extraHeaders?: Record<string, string>) {
+  res.writeHead(status, { "Content-Type": "application/json", ...CORS_HEADERS, ...extraHeaders });
   res.end(JSON.stringify({ ok: false, error: { code, message } }));
 }
 
@@ -137,6 +163,35 @@ function makeTrackedClient(
     ? createClient({ backend: "openrouter", openrouter: { apiKey: byokKey } })
     : createClient({ backend: "openrouter" });
   return wrapWithUsageTracking(base, attribution);
+}
+
+/** Trace payload for options.trace: true (full prompt, model selection, not stored). */
+export type RunTrace = {
+  mode?: string;
+  calls: Array<{ system?: string; user: string; model?: string; modelUsed?: string }>;
+};
+
+/** Wrap a client to record each ask() into trace for debugging (trace: true). */
+function makeTracingClient(
+  client: import("./core/types.js").Client,
+  trace: RunTrace,
+  mode?: string
+): import("./core/types.js").Client {
+  trace.mode = mode;
+  return {
+    ask: async (instruction: string, opts: import("./core/types.js").AskOptions) => {
+      const result = await client.ask(instruction, opts);
+      trace.calls.push({
+        system: opts.system,
+        user: instruction,
+        model: opts.model,
+        modelUsed: result.model ?? undefined,
+      });
+      return result;
+    },
+    testConnection: () => client.testConnection(),
+    ...(client.askStream && { askStream: client.askStream.bind(client) }),
+  };
 }
 
 /** Serialize any input value to a string suitable for use as inputMd. */
@@ -185,14 +240,17 @@ async function handleRun(
   res: import("node:http").ServerResponse,
   body: unknown,
   skillFromPath?: string,
-  req?: import("node:http").IncomingMessage
+  req?: import("node:http").IncomingMessage,
+  rateLimitResult?: RateLimitResult
 ): Promise<void> {
+  const rlHeaders = rateLimitResult ? rateLimitHeaders(rateLimitResult) : undefined;
   const skill = skillFromPath ?? (body as { skill?: string })?.skill;
-  const rawBody = body as { input?: unknown; request?: unknown; options?: { validate?: boolean } };
+  const rawBody = body as { input?: unknown; request?: unknown; options?: { validate?: boolean; trace?: boolean }; mode?: string };
   const request = rawBody?.input ?? rawBody?.request ?? body;
   const validateOption = rawBody?.options?.validate;
+  const traceOption = rawBody?.options?.trace === true;
   if (typeof skill !== "string" || !skill.trim()) {
-    sendError(res, 400, "skill must be a non-empty string", "INVALID_INPUT");
+    sendError(res, 400, "skill must be a non-empty string", "INVALID_INPUT", rlHeaders);
     return;
   }
   const resolver = getSkillsResolver();
@@ -202,8 +260,15 @@ async function handleRun(
     process.env.VALIDATE_SKILL_OUTPUT === "true";
 
   const attribution = req ? extractAttribution(body, skill.trim()) : undefined;
+  const requestId = attribution?.traceId ?? randomUUID();
   const tracker = req ? makeTrackedClient(req, attribution) : null;
-  const client = tracker?.client;
+  let traceCollector: RunTrace | undefined;
+  if (traceOption) {
+    traceCollector = { calls: [] };
+  }
+  const client = tracker
+    ? (traceOption && traceCollector ? makeTracingClient(tracker.client, traceCollector, (request as { mode?: string })?.mode) : tracker.client)
+    : undefined;
 
   try {
     const out = await concurrencyGuard(() =>
@@ -226,29 +291,105 @@ async function handleRun(
       }
     }
 
+    let meta: Awaited<ReturnType<typeof getFunctionMeta>> | null = null;
+    try {
+      meta = await getFunctionMeta(resolver, skill.trim());
+    } catch {
+      /* function may have no meta */
+    }
+    const draft = meta?.status === "draft";
+
+    const tracePayload = traceOption && traceCollector && traceCollector.calls.length > 0 ? { trace: traceCollector } : {};
     if (validateOutput && typeof out === "object" && out !== null && "validation" in out) {
       const { result, validation } = out as { result: unknown; validation: { valid: boolean; errors?: string[] } };
       sendOk(res, {
         result,
         validation: { valid: validation.valid, errors: validation.errors ?? [] },
         usage,
-      });
+        requestId,
+        ...(draft && { draft: true }),
+        ...tracePayload,
+      }, rlHeaders);
     } else {
-      sendOk(res, { result: out, usage });
+      sendOk(res, { result: out, usage, requestId, ...(draft && { draft: true }), ...tracePayload }, rlHeaders);
     }
   } catch (e: unknown) {
     const err = e as { code?: string; status?: number; message?: string };
     if (err.code === "QUEUE_FULL" && err.status === 503) {
-      sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL");
+      sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL", rlHeaders);
+      return;
+    }
+    if (err.status === 413 && err.code === "PAYLOAD_TOO_LARGE") {
+      sendError(res, 413, "Request body too large", "PAYLOAD_TOO_LARGE", rlHeaders);
       return;
     }
     const message = e instanceof Error ? e.message : String(e);
     if (message.includes("Unknown skill")) {
-      sendError(res, 404, `Skill '${skill.trim()}' not found`, "SKILL_NOT_FOUND");
+      sendError(res, 404, `Skill '${skill.trim()}' not found`, "SKILL_NOT_FOUND", rlHeaders);
     } else if (message.includes("No race profile") || message.includes("Run a race first")) {
-      sendError(res, 422, message, "NO_RACE_PROFILE");
+      sendError(res, 422, message, "NO_RACE_PROFILE", rlHeaders);
     } else {
-      sendError(res, 500, message, "RUN_ERROR");
+      sendError(res, 500, message, "RUN_ERROR", rlHeaders);
+    }
+  }
+}
+
+/** Run a function at a pinned version (git ref). Uses getSkillInstructionsAtRef / getSkillRulesAtRef. */
+async function handleRunVersioned(
+  res: import("node:http").ServerResponse,
+  body: unknown,
+  functionId: string,
+  version: string,
+  req: import("node:http").IncomingMessage,
+  rateLimitResult?: RateLimitResult
+): Promise<void> {
+  const rlHeaders = rateLimitResult ? rateLimitHeaders(rateLimitResult) : undefined;
+  const rawBody = body as { input?: unknown; request?: unknown };
+  const request = rawBody?.input ?? rawBody?.request ?? body;
+  const resolver = getSkillsResolver();
+  const attribution = extractAttribution(body, functionId);
+  const requestId = attribution?.traceId ?? randomUUID();
+  const tracker = makeTrackedClient(req, attribution);
+  const client = tracker.client;
+
+  try {
+    const instruction = await getSkillInstructionsAtRef(resolver, functionId, version);
+    const rules = await getSkillRulesAtRef(resolver, functionId, version);
+    const out = await concurrencyGuard(() =>
+      executeSkill({
+        request: request ?? {},
+        buildPrompt: (r) => `# ${functionId}\n\n` + buildRequestPrompt(r),
+        instructions: { weak: instruction, normal: instruction, strong: instruction },
+        rules,
+        client,
+        mode: "normal",
+      })
+    );
+    const usage = toUsageResponse(tracker.getUsage());
+    if (tracker.getUsage().callCount > 0) {
+      appendActivity({
+        functionId,
+        model: tracker.getUsage().model ?? null,
+        projectId: attribution?.projectId,
+        traceId: attribution?.traceId,
+        tokens: { prompt: tracker.getUsage().promptTokens, completion: tracker.getUsage().completionTokens, total: tracker.getUsage().totalTokens },
+        cost: tracker.getUsage().estimatedCost ?? null,
+        latencyMs: tracker.getUsage().latencyMs,
+        status: "success",
+      });
+    }
+    sendOk(res, { result: out, usage, requestId }, rlHeaders);
+  } catch (e: unknown) {
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === "QUEUE_FULL" && err.status === 503) {
+      sendError(res, 503, err.message ?? "Server busy", "QUEUE_FULL", rlHeaders);
+      return;
+    }
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes("Unknown skill") || message.includes("not support version")) {
+      sendError(res, 422, message, "VERSION_NOT_AVAILABLE", rlHeaders);
+    } else {
+      sendError(res, 500, message, "RUN_ERROR", rlHeaders);
     }
   }
 }
@@ -1223,6 +1364,33 @@ async function handleValidateFunction(
   }
 }
 
+async function handleRollbackFunction(res: import("node:http").ServerResponse, name: string, body: unknown): Promise<void> {
+  const b = body as { version?: string };
+  const ref = typeof b?.version === "string" ? b.version.trim() : "";
+  if (!ref) {
+    sendError(res, 400, "version (git ref) is required", "INVALID_INPUT");
+    return;
+  }
+  const resolver = getSkillsResolver();
+  try {
+    const names = await getSkillNamesAsync(resolver);
+    if (!names.includes(name)) {
+      sendError(res, 404, `Function '${name}' not found`, "FUNCTION_NOT_FOUND");
+      return;
+    }
+    await setSkillInstructionsActiveVersion(resolver, name, ref);
+    await setSkillRulesActiveVersion(resolver, name, ref);
+    sendOk(res, { rolledBack: true, version: ref });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes("does not support version") || message.includes("not found")) {
+      sendError(res, 422, message, "ROLLBACK_NOT_AVAILABLE");
+    } else {
+      sendError(res, 500, message, "ROLLBACK_ERROR");
+    }
+  }
+}
+
 async function handleReleaseFunction(res: import("node:http").ServerResponse, name: string): Promise<void> {
   const resolver = getSkillsResolver();
   try {
@@ -1421,8 +1589,10 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
         "POST /functions/:id:optimize": "Optimize function instructions (job)",
         "POST /functions/:id:validate": "Validate function quality",
         "POST /functions/:id:release": "Release function (score-gated)",
+        "POST /functions/:id:rollback": "Set current instructions/rules to a previous version (body: { version: gitRef })",
         "POST /functions/:id:push": "Push to remote git",
         "GET /functions/:id/versions": "Version history",
+        "POST /functions/:id/versions/:version/run": "Run function at pinned version (ref = git sha)",
         "GET /functions/:id/profiles": "Race winner profiles and defaults",
         "GET /functions/:id/race-report": "Race history (query: last, since, raceId)",
         "GET /functions/:id/test-cases": "Get test cases",
@@ -1472,15 +1642,46 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
     if (pathStr === "/skills" && method === "GET") { await handleSkillsList(res, query); return; }
     if (method === "GET" && segments.length === 2) { await handleSkillDetail(res, segments[1]!); return; }
     if (method === "POST" && segments.length === 3 && segments[2] === "run") {
-      const body = await readJsonBody(req);
-      await handleRun(res, body, segments[1], req); return;
+      try {
+        const body = await readJsonBody(req);
+        const rlKey = getRateLimitKey(req);
+        const rl = consumeRateLimit(rlKey);
+        if (!rl.allowed) {
+          sendError(res, 429, "Rate limit exceeded", "RATE_LIMIT_EXCEEDED", rateLimitHeaders(rl));
+          return;
+        }
+        await handleRun(res, body, segments[1], req, rl);
+      } catch (e) {
+        const err = e as { status?: number; code?: string; message?: string };
+        if (err.status === 413 || err.code === "PAYLOAD_TOO_LARGE") {
+          sendError(res, 413, "Request body too large", "PAYLOAD_TOO_LARGE");
+          return;
+        }
+        sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
+      }
+      return;
     }
   }
 
   // --- /run ---
   if (pathStr === "/run" && method === "POST") {
-    try { const body = await readJsonBody(req); await handleRun(res, body, undefined, req); }
-    catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+    try {
+      const body = await readJsonBody(req);
+      const rlKey = getRateLimitKey(req);
+      const rl = consumeRateLimit(rlKey);
+      if (!rl.allowed) {
+        sendError(res, 429, "Rate limit exceeded", "RATE_LIMIT_EXCEEDED", rateLimitHeaders(rl));
+        return;
+      }
+      await handleRun(res, body, undefined, req, rl);
+    } catch (e) {
+      const err = e as { status?: number; code?: string; message?: string };
+      if (err.status === 413 || err.code === "PAYLOAD_TOO_LARGE") {
+        sendError(res, 413, "Request body too large", "PAYLOAD_TOO_LARGE");
+        return;
+      }
+      sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
+    }
     return;
   }
 
@@ -1556,13 +1757,18 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
     }
 
     if (fnSegment) {
-      // Colon-action routes: /functions/myId:validate, :release, :push, :optimize
-      const colonActions = [":validate", ":release", ":push", ":optimize"] as const;
+      // Colon-action routes: /functions/myId:validate, :release, :rollback, :push, :optimize
+      const colonActions = [":validate", ":release", ":rollback", ":push", ":optimize"] as const;
       for (const action of colonActions) {
         if (method === "POST" && segments.length === 2 && fnSegment.endsWith(action)) {
           const cleanId = fnSegment.slice(0, -action.length);
           if (action === ":validate") { await handleValidateFunction(res, cleanId, req); return; }
           if (action === ":release") { await handleReleaseFunction(res, cleanId); return; }
+          if (action === ":rollback") {
+            try { const body = await readJsonBody(req); await handleRollbackFunction(res, cleanId, body); }
+            catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+            return;
+          }
           if (action === ":push") { await handleFunctionPush(res, cleanId); return; }
           if (action === ":optimize") {
             try { const body = await readJsonBody(req); await handleFunctionOptimize(res, body, cleanId); }
@@ -1572,10 +1778,57 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
         }
       }
 
+      // POST /functions/:id/versions/:version/run — run at pinned version (ref = git sha)
+      if (method === "POST" && segments.length === 5 && segments[2] === "versions" && segments[4] === "run") {
+        const versionRef = segments[3]!;
+        try {
+          const body = await readJsonBody(req);
+          const names = await getSkillNamesAsync(getSkillsResolver());
+          if (!names.includes(fnSegment)) {
+            sendError(res, 404, `Function '${fnSegment}' not found`, "FUNCTION_NOT_FOUND");
+            return;
+          }
+          const rlKey = getRateLimitKey(req);
+          const rl = consumeRateLimit(rlKey);
+          if (!rl.allowed) {
+            sendError(res, 429, "Rate limit exceeded", "RATE_LIMIT_EXCEEDED", rateLimitHeaders(rl));
+            return;
+          }
+          await handleRunVersioned(res, body, fnSegment, versionRef, req, rl);
+        } catch (e) {
+          const err = e as { status?: number; code?: string; message?: string };
+          if (err.status === 413 || err.code === "PAYLOAD_TOO_LARGE") {
+            sendError(res, 413, "Request body too large", "PAYLOAD_TOO_LARGE");
+            return;
+          }
+          sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
+        }
+        return;
+      }
+
       // Sub-resource routes: /functions/:id/run, /optimize, /versions, /test-cases
       if (segments.length === 3) {
         const sub = segments[2]!;
-        if (method === "POST" && sub === "run") { const body = await readJsonBody(req); await handleRun(res, body, fnSegment, req); return; }
+        if (method === "POST" && sub === "run") {
+          try {
+            const body = await readJsonBody(req);
+            const rlKey = getRateLimitKey(req);
+            const rl = consumeRateLimit(rlKey);
+            if (!rl.allowed) {
+              sendError(res, 429, "Rate limit exceeded", "RATE_LIMIT_EXCEEDED", rateLimitHeaders(rl));
+              return;
+            }
+            await handleRun(res, body, fnSegment, req, rl);
+          } catch (e) {
+            const err = e as { status?: number; code?: string; message?: string };
+            if (err.status === 413 || err.code === "PAYLOAD_TOO_LARGE") {
+              sendError(res, 413, "Request body too large", "PAYLOAD_TOO_LARGE");
+              return;
+            }
+            sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
+          }
+          return;
+        }
         if (method === "POST" && sub === "optimize") {
           try { const body = await readJsonBody(req); await handleFunctionOptimize(res, body, fnSegment); }
           catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
@@ -1722,6 +1975,11 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
 
 const server = createServer((req, res) => {
   handler(req, res).catch((e) => {
+    const err = e as { status?: number; code?: string; message?: string };
+    if (err.status === 413 || err.code === "PAYLOAD_TOO_LARGE") {
+      sendError(res, 413, "Request body too large", "PAYLOAD_TOO_LARGE");
+      return;
+    }
     sendError(res, 500, e instanceof Error ? e.message : String(e), "SERVER_ERROR");
   });
 });

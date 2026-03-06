@@ -29,6 +29,7 @@ import { raceModelsV1 } from "./orchestration/raceModelsV1.js";
 import { generateInstructionsV1 } from "./orchestration/generateInstructionsV1.js";
 import { collectionMappingV1 } from "./recordsMapper/collectionMappingV1.js";
 import { validateOutput } from "./validate/validateOutput.js";
+import { validateFieldRelationship, suggestFieldRelationship } from "./validate/validateFieldRelationship.js";
 
 /** Options passed to built-in skills when run() has a resolver (e.g. rules from content). */
 export type SkillRunOptions = { rules?: Array<{ rule: string; weight: number }> };
@@ -43,6 +44,8 @@ const compareFn: SkillFn = (req: unknown) => compareV1(req as Parameters<typeof 
 const raceModelsFn: SkillFn = (req: unknown) => raceModelsV1(req as Parameters<typeof raceModelsV1>[0]);
 const generateInstructionsFn: SkillFn = (req: unknown) => generateInstructionsV1(req as Parameters<typeof generateInstructionsV1>[0]);
 const collectionMappingFn: SkillFn = (req: unknown) => collectionMappingV1(req as Parameters<typeof collectionMappingV1>[0]);
+const validateFieldRelationshipFn: SkillFn = (req: unknown) => validateFieldRelationship(req as Parameters<typeof validateFieldRelationship>[0]);
+const suggestFieldRelationshipFn: SkillFn = (req: unknown) => suggestFieldRelationship(req as Parameters<typeof suggestFieldRelationship>[0]);
 
 const SKILLS = {
   matchLists,
@@ -75,6 +78,8 @@ const SKILLS = {
   "ai.generate-instructions.v1": generateInstructionsFn,
   collectionMapping: collectionMappingFn,
   "recordsMapper.collectionMapping.v1": collectionMappingFn,
+  validateFieldRelationship: validateFieldRelationshipFn,
+  suggestFieldRelationship: suggestFieldRelationshipFn,
 } as Record<string, SkillFn>;
 
 /** Canonical skill names returned by getSkillNames() (no V1/dotted aliases). */
@@ -98,6 +103,8 @@ const PRIMARY_SKILL_NAMES: string[] = [
   "generateJudgeRules",
   "raceModels",
   "collectionMapping",
+  "validateFieldRelationship",
+  "suggestFieldRelationship",
   "ai.normalize-judge-rules.v1",
   "ai.aggregate-judge-feedback.v1",
 ];

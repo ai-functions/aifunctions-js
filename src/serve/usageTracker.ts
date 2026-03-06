@@ -93,6 +93,8 @@ export type UsageResponse = {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /** Alias for totalTokens (parity with aifunction.dev contract). */
+  tokens?: number;
   model: string | null;
   latencyMs: number;
   estimatedCost?: number;
@@ -109,6 +111,7 @@ export function toUsageResponse(tracked: TrackedUsage): UsageResponse | null {
     promptTokens: tracked.promptTokens,
     completionTokens: tracked.completionTokens,
     totalTokens: tracked.totalTokens,
+    tokens: tracked.totalTokens,
     model: tracked.model,
     latencyMs: tracked.latencyMs,
   };

@@ -153,11 +153,23 @@ export type {
   CollectionSummary,
 } from "./recordsMapper/index.js";
 
-export { validateOutput, validateAgainstSchema, validateJson } from "./validate/index.js";
+export { validateOutput, validateAgainstSchema, validateJson, validateFieldRelationship, suggestFieldRelationship } from "./validate/index.js";
 export type {
   ValidateOutputResult,
   ValidateOutputOptions,
   ValidationResult,
   ValidationResultOk,
   ValidationResultFail,
+  FieldRelationship,
+  FieldMappingDocument,
+  FieldInferable,
+  CollectionInferable,
+  EdgeInferable,
+  FieldSemanticType,
+  FieldKeyRole,
+  FieldConstraints,
+  ValidateFieldRelationshipRequest,
+  ValidateFieldRelationshipOutput,
+  SuggestFieldRelationshipRequest,
+  SuggestFieldRelationshipOutput,
 } from "./validate/index.js";
