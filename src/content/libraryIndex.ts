@@ -4,8 +4,12 @@
  */
 import type { ContentResolver } from "nx-content";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 const DEFAULT_INDEX_KEY = "skills/index.v1.json";
+/** Path relative to process.cwd() for fallback when content has no index. */
+export const LIBRARY_INDEX_FALLBACK_REL = ".docs/library-index.fallback.json";
 const INDEX_PREFIX = "skills/index/v1/";
 const META_KEY = "skills/index/v1/_meta.json";
 const CONTENT_PREFIX = "skills/";
@@ -76,6 +80,8 @@ export type GetLibraryIndexOptions = {
   key?: string;
   /** If true, return empty structure when index is missing; otherwise throw. */
   allowMissing?: boolean;
+  /** When allowMissing and resolver has no index, try this path (relative to cwd). Omit to use LIBRARY_INDEX_FALLBACK_REL. */
+  fallbackPath?: string | null;
 };
 
 export type UpdateLibraryIndexOptions = {
@@ -90,6 +96,8 @@ export type UpdateLibraryIndexOptions = {
   incremental?: boolean;
   /** Overwrite index even when result would be empty/partial (e.g. all skills errored). */
   force?: boolean;
+  /** When true, skip LLM and build index from content only (static entries). Ensures library is always generated for visibility. */
+  staticOnly?: boolean;
 };
 
 export type UpdateLibraryIndexReport = {
@@ -134,6 +142,53 @@ function groupKeysBySkill(keys: string[]): Map<string, string[]> {
   }
   for (const list of bySkill.values()) list.sort();
   return bySkill;
+}
+
+/** Minimal restricted JSON Schema for input/output when no LLM-derived schema is available. */
+const MINIMAL_IO_SCHEMA: RestrictedJsonSchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+  required: [],
+};
+
+/**
+ * Build a valid index entry from content only (no LLM). Used so the shared library
+ * is always generated for visibility and usability of functions, then optionally
+ * enriched later via LLM.
+ */
+function buildStaticIndexEntry(
+  skillId: string,
+  files: SourceFile[],
+  contentHashVal: string,
+  concatenatedContent: string
+): SkillIndexEntry {
+  const displayName = skillId.charAt(0).toUpperCase() + skillId.slice(1).replace(/([A-Z])/g, " $1").trim();
+  let description = (concatenatedContent || "").trim().split(/\n+/).find((l) => l.trim().length > 0) || "";
+  description = description.replace(/^#+\s*/, "").trim().slice(0, 240) || `Skill: ${skillId}`;
+  return {
+    schemaVersion: "1.0",
+    id: skillId,
+    displayName,
+    description,
+    source: {
+      contentPrefix: CONTENT_PREFIX,
+      files,
+      contentHash: contentHashVal,
+    },
+    runtime: {
+      callName: skillId,
+      modes: ["weak", "normal", "strong"],
+      defaults: { mode: "normal", temperature: 0.2, maxTokens: 1200 },
+    },
+    io: {
+      input: MINIMAL_IO_SCHEMA,
+      output: MINIMAL_IO_SCHEMA,
+    },
+    examples: [],
+    tags: [],
+    quality: { confidence: 0.4, notes: ["Static index; run with LLM (content:index) to enrich description and I/O schema"] },
+  };
 }
 
 async function getContent(resolver: ContentResolver, key: string): Promise<string> {
@@ -209,25 +264,49 @@ export function validateLibraryIndex(index: unknown): ValidationResult {
 
 /**
  * Read and parse the aggregate library index. Throws if missing unless allowMissing.
+ * When allowMissing is true and the resolver has no index, tries the fallback file at
+ * options.fallbackPath or LIBRARY_INDEX_FALLBACK_REL (relative to process.cwd()).
  */
 export async function getLibraryIndex(
   options: GetLibraryIndexOptions
 ): Promise<AggregateIndex> {
-  const { resolver, key = DEFAULT_INDEX_KEY, allowMissing = false } = options;
+  const {
+    resolver,
+    key = DEFAULT_INDEX_KEY,
+    allowMissing = false,
+    fallbackPath = LIBRARY_INDEX_FALLBACK_REL,
+  } = options;
+  let text = "";
   try {
     const raw = await resolver.get(key);
-    const text = typeof raw === "string" ? raw : "";
-    if (!text.trim()) {
-      if (allowMissing) return emptyAggregate();
-      throw new Error(`Library index is empty at ${key}`);
-    }
+    text = typeof raw === "string" ? raw : "";
+  } catch {
+    if (!allowMissing) throw new Error(`Library index missing at ${key}`);
+    return readFallbackOrEmpty(fallbackPath);
+  }
+  if (text.trim()) {
     const data = JSON.parse(text) as unknown;
     const result = validateLibraryIndex(data);
     if (!result.valid) throw new Error(`Invalid library index: ${result.errors?.join("; ")}`);
     return data as AggregateIndex;
-  } catch (e) {
-    if (allowMissing) return emptyAggregate();
-    throw e;
+  }
+  if (!allowMissing) throw new Error(`Library index is empty at ${key}`);
+  return readFallbackOrEmpty(fallbackPath);
+}
+
+async function readFallbackOrEmpty(fallbackPath: string | null | undefined): Promise<AggregateIndex> {
+  if (fallbackPath === null) return emptyAggregate();
+  const tryPath = fallbackPath ?? LIBRARY_INDEX_FALLBACK_REL;
+  const absPath = path.isAbsolute(tryPath) ? tryPath : path.join(process.cwd(), tryPath);
+  try {
+    const text = await readFile(absPath, "utf-8");
+    if (!text.trim()) return emptyAggregate();
+    const data = JSON.parse(text) as unknown;
+    const result = validateLibraryIndex(data);
+    if (!result.valid) return emptyAggregate();
+    return data as AggregateIndex;
+  } catch {
+    return emptyAggregate();
   }
 }
 
@@ -255,6 +334,7 @@ export async function updateLibraryIndex(
     dryRun = false,
     incremental = false,
     force = false,
+    staticOnly = false,
   } = options;
 
   const report: UpdateLibraryIndexReport = {
@@ -306,6 +386,21 @@ export async function updateLibraryIndex(
       continue;
     }
 
+    if (staticOnly) {
+      const staticEntry = buildStaticIndexEntry(skillId, files, hash, concatenated);
+      const staticValid = validateSkillIndexEntry(staticEntry);
+      if (staticValid.valid) {
+        if (!dryRun) await resolver.set(refKey, JSON.stringify(staticEntry, null, 2));
+        report.stats.skillsUpdated++;
+        refKeys.push(refKey);
+      } else {
+        report.stats.skillsErrored++;
+        report.errors.push({ skillId, reason: "Static entry validation failed" });
+        if (existing) refKeys.push(refKey);
+      }
+      continue;
+    }
+
     const { askJson } = await import("../../functions/askJson.js");
     const system = getIndexerSystemPrompt();
     const user = getIndexerUserPrompt(skillId, skillId, files, concatenated);
@@ -328,12 +423,22 @@ export async function updateLibraryIndex(
       if (fallback) llmResult = fallback;
     }
     if (!llmResult || typeof llmResult !== "object") {
-      report.stats.skillsErrored++;
-      const reason = lastError || "LLM returned no object";
-      report.errors.push({ skillId, reason });
-      metaErrors.push({ skillId, reason, lastGoodRefKey: existing ? refKey : undefined });
-      if (existing) {
+      // Always produce an index entry for visibility/usability: use static entry when LLM is unavailable
+      const staticEntry = buildStaticIndexEntry(skillId, files, hash, concatenated);
+      const staticValid = validateSkillIndexEntry(staticEntry);
+      if (staticValid.valid) {
+        if (!dryRun) await resolver.set(refKey, JSON.stringify(staticEntry, null, 2));
+        report.stats.skillsUpdated++;
         refKeys.push(refKey);
+        report.errors.push({
+          skillId,
+          reason: lastError ? `LLM failed (${lastError}); used static entry` : "Used static entry (no LLM)",
+        });
+      } else {
+        report.stats.skillsErrored++;
+        report.errors.push({ skillId, reason: lastError || "LLM returned no object" });
+        metaErrors.push({ skillId, reason: lastError || "LLM failed", lastGoodRefKey: existing ? refKey : undefined });
+        if (existing) refKeys.push(refKey);
       }
       continue;
     }
@@ -348,10 +453,22 @@ export async function updateLibraryIndex(
     const wrapped = wrapLlmOutput(llmResult as LlmSkillOutput, skillId, files, hash);
     const entryValidation = validateSkillIndexEntry(wrapped);
     if (!entryValidation.valid) {
-      report.stats.skillsErrored++;
-      report.errors.push({ skillId, reason: entryValidation.errors?.join("; ") ?? "Validation failed" });
-      metaErrors.push({ skillId, reason: entryValidation.errors?.join("; ") ?? "", lastGoodRefKey: existing ? refKey : undefined });
-      if (existing) refKeys.push(refKey);
+      const staticEntry = buildStaticIndexEntry(skillId, files, hash, concatenated);
+      const staticValid = validateSkillIndexEntry(staticEntry);
+      if (staticValid.valid) {
+        if (!dryRun) await resolver.set(refKey, JSON.stringify(staticEntry, null, 2));
+        report.stats.skillsUpdated++;
+        refKeys.push(refKey);
+        report.errors.push({
+          skillId,
+          reason: `LLM output invalid (${entryValidation.errors?.join("; ") ?? "validation failed"}); used static entry`,
+        });
+      } else {
+        report.stats.skillsErrored++;
+        report.errors.push({ skillId, reason: entryValidation.errors?.join("; ") ?? "Validation failed" });
+        metaErrors.push({ skillId, reason: entryValidation.errors?.join("; ") ?? "", lastGoodRefKey: existing ? refKey : undefined });
+        if (existing) refKeys.push(refKey);
+      }
       continue;
     }
     if (!dryRun) {

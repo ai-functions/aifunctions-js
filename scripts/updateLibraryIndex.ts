@@ -8,13 +8,14 @@
  *
  * Options:
  *   --dry-run       Do not write; print report only.
+ *   --static-only   Build index from content only (no LLM). Use for visibility when API is unavailable.
  *   --incremental   Skip skills whose content hash is unchanged.
  *   --force         Overwrite index even if result would be empty/partial.
  *   --prefix=PREFIX Content prefix to list (default: skills/).
  *   --mode=MODE     LLM mode: weak | normal | strong (default: normal).
  *   --model=MODEL   Override model.
  *
- * Prerequisites: .content with skills/ subtree (or set localRoot). OPENROUTER_API_KEY for normal/strong.
+ * Prerequisites: .content with skills/ subtree (or set localRoot). OPENROUTER_API_KEY for normal/strong (omit for --static-only).
  */
 import { ContentResolver } from "nx-content";
 import path from "node:path";
@@ -32,6 +33,7 @@ function parseArg(args: string[], name: string): string | undefined {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
+  const staticOnly = args.includes("--static-only");
   const incremental = args.includes("--incremental");
   const force = args.includes("--force");
   const prefix = parseArg(args, "prefix") ?? "skills/";
@@ -50,7 +52,7 @@ async function main(): Promise<void> {
   }
 
   console.log("Updating library index...");
-  console.log("  prefix:", prefix, "| mode:", mode, "| dryRun:", dryRun, "| incremental:", incremental);
+  console.log("  prefix:", prefix, "| mode:", mode, "| dryRun:", dryRun, "| staticOnly:", staticOnly, "| incremental:", incremental);
 
   const report = await updateLibraryIndex({
     resolver,
@@ -60,6 +62,7 @@ async function main(): Promise<void> {
     dryRun,
     incremental,
     force,
+    staticOnly,
   });
 
   console.log("\nReport:");

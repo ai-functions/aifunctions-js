@@ -96,6 +96,7 @@ export type { PushSkillsContentOptions } from "./content/publishSkills.js";
 
 export {
   getLibraryIndex,
+  LIBRARY_INDEX_FALLBACK_REL,
   updateLibraryIndex,
   validateLibraryIndex,
   validateSkillIndexEntry,

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-03-06T17:30:25.958Z",
+  "generator": {
+    "name": "light-skills-indexer",
+    "mode": "normal"
+  },
+  "skills": [
+    {
+      "$refKey": "skills/index/v1/classify.json"
+    },
+    {
+      "$refKey": "skills/index/v1/cluster.json"
+    },
+    {
+      "$refKey": "skills/index/v1/extractEntities.json"
+    },
+    {
+      "$refKey": "skills/index/v1/extractTopics.json"
+    },
+    {
+      "$refKey": "skills/index/v1/matchLists.json"
+    },
+    {
+      "$refKey": "skills/index/v1/rank.json"
+    },
+    {
+      "$refKey": "skills/index/v1/sentiment.json"
+    },
+    {
+      "$refKey": "skills/index/v1/summarize.json"
+    },
+    {
+      "$refKey": "skills/index/v1/translate.json"
+    }
+  ]
+}

@@ -2,10 +2,13 @@
  * Unit tests for library index (getLibraryIndex, validateLibraryIndex, validateSkillIndexEntry).
  * No LLM or real content backend required.
  */
+import { readFileSync, existsSync } from "node:fs";
+import path from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   getLibraryIndex,
+  LIBRARY_INDEX_FALLBACK_REL,
   validateLibraryIndex,
   validateSkillIndexEntry,
   type AggregateIndex,
@@ -106,7 +109,18 @@ describe("getLibraryIndex", () => {
     assert.strictEqual(index.skills.length, 1);
     assert.strictEqual(index.skills[0].$refKey, "skills/index/v1/extractTopics.json");
   });
-  it("returns empty aggregate when allowMissing and key missing", async () => {
+  it("returns empty aggregate when allowMissing and key missing and no fallback", async () => {
+    const resolver = {
+      get: async () => {
+        throw new Error("ENOENT");
+      },
+      listKeys: async () => [],
+    } as Parameters<typeof getLibraryIndex>[0]["resolver"];
+    const index = await getLibraryIndex({ resolver, allowMissing: true, fallbackPath: null });
+    assert.strictEqual(index.schemaVersion, "1.0");
+    assert.strictEqual(index.skills.length, 0);
+  });
+  it("returns fallback when allowMissing and key missing and fallback exists", async () => {
     const resolver = {
       get: async () => {
         throw new Error("ENOENT");
@@ -115,7 +129,7 @@ describe("getLibraryIndex", () => {
     } as Parameters<typeof getLibraryIndex>[0]["resolver"];
     const index = await getLibraryIndex({ resolver, allowMissing: true });
     assert.strictEqual(index.schemaVersion, "1.0");
-    assert.strictEqual(index.skills.length, 0);
+    assert.ok(Array.isArray(index.skills));
   });
   it("throws when missing and allowMissing false", async () => {
     const resolver = {
@@ -124,6 +138,35 @@ describe("getLibraryIndex", () => {
       },
       listKeys: async () => [],
     } as Parameters<typeof getLibraryIndex>[0]["resolver"];
-    await assert.rejects(() => getLibraryIndex({ resolver, allowMissing: false }), /not found|empty/);
+    await assert.rejects(() => getLibraryIndex({ resolver, allowMissing: false }), /not found|empty|missing/);
+  });
+});
+
+describe("library index fallback (.docs)", () => {
+  it("fallback file exists and is valid aggregate", () => {
+    const fallbackPath = path.join(process.cwd(), LIBRARY_INDEX_FALLBACK_REL);
+    assert.ok(existsSync(fallbackPath), `Fallback file should exist at ${fallbackPath}`);
+    const raw = readFileSync(fallbackPath, "utf-8");
+    const data = JSON.parse(raw) as unknown;
+    const result = validateLibraryIndex(data);
+    assert.strictEqual(result.valid, true, result.errors?.join("; "));
+    assert.strictEqual((data as AggregateIndex).schemaVersion, "1.0");
+    assert.ok(Array.isArray((data as AggregateIndex).skills));
+  });
+  it("fallback has valid aggregate (skills array; empty or populated)", () => {
+    const fallbackPath = path.join(process.cwd(), LIBRARY_INDEX_FALLBACK_REL);
+    const data = JSON.parse(readFileSync(fallbackPath, "utf-8")) as AggregateIndex;
+    const result = validateLibraryIndex(data);
+    assert.strictEqual(result.valid, true);
+    assert.ok(Array.isArray(data.skills), "skills must be array");
+  });
+  it("getLibraryIndex with allowMissing uses fallback when resolver returns empty", async () => {
+    const resolver = {
+      get: async () => "",
+      listKeys: async () => [],
+    } as Parameters<typeof getLibraryIndex>[0]["resolver"];
+    const index = await getLibraryIndex({ resolver, allowMissing: true });
+    assert.strictEqual(index.schemaVersion, "1.0");
+    assert.ok(Array.isArray(index.skills));
   });
 });

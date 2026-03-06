@@ -47,6 +47,11 @@
     "content:index": "npm run build && tsx scripts/updateLibraryIndex.ts",
     "content:index:dry": "npm run build && tsx scripts/updateLibraryIndex.ts -- --dry-run",
     "content:index:commit": "scripts/commitContentIndex.sh",
+    "content:index:copy-fallback": "tsx scripts/copyLibraryIndexToDocs.ts",
+    "content:index:copy-full-fallback": "tsx scripts/copyFullLibraryIndexToDocs.ts",
+    "content:index:real": "npm run content:index && npm run content:index:copy-fallback",
+    "content:index:real:full": "npm run content:index && npm run content:index:copy-fallback && npm run content:index:copy-full-fallback",
+    "content:index:static": "npm run build && tsx scripts/updateLibraryIndex.ts -- --static-only",
     "content:fixtures": "tsx scripts/runFixtures.ts",
     "content:layout-lint": "tsx scripts/lintContentLayout.ts",
     "serve": "node dist/src/serve.js"
