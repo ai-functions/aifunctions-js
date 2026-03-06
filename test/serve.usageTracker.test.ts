@@ -67,6 +67,11 @@ describe("wrapWithUsageTracking with attribution", () => {
     assert.strictEqual(response!.totalTokens, 150);
     assert.strictEqual(response!.model, "openai/gpt-5-nano");
     assert.strictEqual(response!.estimatedCost, 0.001);
+    assert.ok(response!.costEstimate);
+    assert.strictEqual(response!.costEstimate!.amountUsd, 0.001);
+    assert.strictEqual(response!.costEstimate!.status, "available");
+    assert.strictEqual(response!.costEstimate!.confidence, "high");
+    assert.strictEqual(response!.costEstimate!.source, "provider-response");
   });
 
   it("toUsageResponse returns null when callCount is 0", () => {
@@ -100,5 +105,70 @@ describe("wrapWithUsageTracking with attribution", () => {
     assert.strictEqual("functionId" in response! ? response.functionId : undefined, undefined);
     assert.strictEqual("projectId" in response! ? response.projectId : undefined, undefined);
     assert.strictEqual(response!.promptTokens, 100);
+    assert.ok(response!.costEstimate);
+    assert.strictEqual(response!.costEstimate!.status, "available");
+  });
+
+  it("uses pricing table fallback with estimated status when provider cost is missing", async () => {
+    globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "ok" } }],
+          usage,
+          model: body.model ?? "openai/gpt-5-nano",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    };
+    const base = createClient({
+      backend: "openrouter",
+      openrouter: { apiKey: "test-key" },
+    });
+    const tracker = wrapWithUsageTracking(base);
+    await tracker.client.ask("Hi", {
+      model: "openai/gpt-5-nano",
+      maxTokens: 50,
+      temperature: 0.5,
+    });
+    const response = toUsageResponse(tracker.getUsage());
+    restoreFetch();
+    assert.ok(response);
+    assert.strictEqual(typeof response!.estimatedCost, "number");
+    assert.strictEqual(response!.costEstimate?.status, "estimated");
+    assert.strictEqual(response!.costEstimate?.confidence, "medium");
+    assert.strictEqual(response!.costEstimate?.reasonCode, undefined);
+    assert.strictEqual(response!.costEstimate?.source, "provider-pricing-registry");
+    assert.strictEqual(response!.costEstimate?.priceVersion, "openai-cost@2026-03-05");
+  });
+
+  it("returns structured unavailable state when pricing cannot be resolved", async () => {
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "ok" } }],
+          usage,
+          model: "anthropic/claude-3.5-haiku",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    const base = createClient({
+      backend: "openrouter",
+      openrouter: { apiKey: "test-key" },
+    });
+    const tracker = wrapWithUsageTracking(base);
+    await tracker.client.ask("Hi", {
+      model: "anthropic/claude-3.5-haiku",
+      maxTokens: 50,
+      temperature: 0.5,
+    });
+    const response = toUsageResponse(tracker.getUsage());
+    restoreFetch();
+    assert.ok(response);
+    assert.strictEqual(response!.estimatedCost, undefined);
+    assert.strictEqual(response!.costEstimate?.amountUsd, null);
+    assert.strictEqual(response!.costEstimate?.status, "unavailable");
+    assert.strictEqual(response!.costEstimate?.confidence, "none");
+    assert.strictEqual(response!.costEstimate?.reasonCode, "BACKEND_NO_PRICING");
   });
 });

@@ -82,7 +82,7 @@ const SKILLS = {
   suggestFieldRelationship: suggestFieldRelationshipFn,
 } as Record<string, SkillFn>;
 
-/** Canonical skill names returned by getSkillNames() (no V1/dotted aliases). */
+/** Canonical function names returned by getSkillNames() (no V1/dotted aliases). */
 const PRIMARY_SKILL_NAMES: string[] = [
   "matchLists",
   "extractTopics",
@@ -152,7 +152,7 @@ export async function run(
     const fromContent = await getSkillNamesFromContent(resolver);
     if (!fromContent.includes(skill)) {
       const available = [...getSkillNames(), ...fromContent];
-      throw new Error(`Unknown skill: ${skill}. Available: ${available.join(", ")}`);
+      throw new Error(`Unknown function: ${skill}. Available: ${available.join(", ")}`);
     }
     result = await runWithContent(skill, request, { resolver, client: options?.client });
   }

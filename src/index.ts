@@ -23,6 +23,11 @@ export type {
   TrackedUsage,
   UsageTracker,
   UsageResponse,
+  CostEstimate,
+  CostEstimateStatus,
+  CostEstimateConfidence,
+  CostEstimateReasonCode,
+  CostEstimateSource,
 } from "./serve/usageTracker.js";
 export { getModePreset, resolveOptionsFromMode } from "./core/modePreset.js";
 export type { ModePreset, ResolvedAskOptions } from "./core/modePreset.js";
@@ -97,15 +102,24 @@ export type { PushSkillsContentOptions } from "./content/publishSkills.js";
 export {
   getLibraryIndex,
   LIBRARY_INDEX_FALLBACK_REL,
+  getBuiltInAbilityEntries,
   updateLibraryIndex,
   validateLibraryIndex,
   validateSkillIndexEntry,
 } from "./content/libraryIndex.js";
+export {
+  buildFullLibrarySnapshot,
+  writeFullLibrarySnapshot,
+  DEFAULT_FULL_LIBRARY_DOCS_PATH,
+} from "./content/fullLibrarySnapshot.js";
 export type {
   AggregateIndex,
+  BuiltInSkillSource,
   GetLibraryIndexOptions,
   IndexMeta,
   RestrictedJsonSchemaObject,
+  SkillQuality,
+  SkillQualityMethod,
   SkillIndexEntry,
   SkillIO,
   SkillRuntime,
@@ -116,6 +130,17 @@ export type {
   UpdateLibraryIndexReport,
   ValidationResult,
 } from "./content/libraryIndex.js";
+export { getBuiltInAbilityManifest } from "../functions/builtinManifest.js";
+export type {
+  BuiltInAbilityEntry,
+  BuiltInAbilityQuality,
+} from "../functions/builtinManifest.js";
+export type {
+  BuildFullLibrarySnapshotOptions,
+  FullEmbeddedFile,
+  FullLibrarySkillEntry,
+  FullLibrarySnapshot,
+} from "./content/fullLibrarySnapshot.js";
 
 export function createClient(config: CreateClientOptions): Client {
   switch (config.backend) {

@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import {
   getLibraryIndex,
   LIBRARY_INDEX_FALLBACK_REL,
+  updateLibraryIndex,
   validateLibraryIndex,
   validateSkillIndexEntry,
   type AggregateIndex,
@@ -49,7 +50,7 @@ const validSkillEntry: SkillIndexEntry = {
       required: ["topics"],
     },
   },
-  quality: { confidence: 0.9, notes: [] },
+  quality: { confidence: 0.9, method: "llm-inferred", notes: [] },
 };
 
 describe("validateLibraryIndex", () => {
@@ -95,6 +96,14 @@ describe("validateSkillIndexEntry", () => {
       io: { ...validSkillEntry.io, input: { type: "string" } as never },
     });
     assert.strictEqual(r.valid, false);
+  });
+  it("accepts built-in source with null confidence", () => {
+    const r = validateSkillIndexEntry({
+      ...validSkillEntry,
+      source: { kind: "built-in" },
+      quality: { confidence: null, method: "not-judged", notes: [] },
+    });
+    assert.strictEqual(r.valid, true);
   });
 });
 
@@ -168,5 +177,114 @@ describe("library index fallback (.docs)", () => {
     const index = await getLibraryIndex({ resolver, allowMissing: true });
     assert.strictEqual(index.schemaVersion, "1.0");
     assert.ok(Array.isArray(index.skills));
+  });
+});
+
+describe("updateLibraryIndex includes built-ins and quality method", () => {
+  it("writes built-in entries when content is empty", async () => {
+    const store = new Map<string, string>();
+    const resolver = {
+      get: async (key: string) => {
+        if (!store.has(key)) throw new Error("ENOENT");
+        return store.get(key)!;
+      },
+      set: async (key: string, value: string) => {
+        store.set(key, value);
+      },
+      listKeys: async () => [],
+    } as unknown as Parameters<typeof updateLibraryIndex>[0]["resolver"];
+
+    const report = await updateLibraryIndex({
+      resolver,
+      includeBuiltIn: true,
+      staticOnly: true,
+    });
+    assert.ok(report.refKeys.length >= 23);
+    const aggregateRaw = store.get("skills/index.v1.json");
+    assert.ok(aggregateRaw);
+    const aggregate = JSON.parse(aggregateRaw!) as AggregateIndex;
+    assert.ok(aggregate.skills.some((s) => s.$refKey.endsWith("/classify.json")));
+    const classifyRaw = store.get("skills/index/v1/classify.json");
+    assert.ok(classifyRaw);
+    const classifyEntry = JSON.parse(classifyRaw!) as SkillIndexEntry;
+    assert.deepStrictEqual(classifyEntry.source, { kind: "built-in" });
+    assert.strictEqual(classifyEntry.quality.method, "not-judged");
+    assert.strictEqual(classifyEntry.quality.confidence, null);
+  });
+
+  it("static content entries do not use hardcoded 0.4 confidence", async () => {
+    const store = new Map<string, string>();
+    store.set("skills/demo/normal.md", "Demo instructions");
+    const resolver = {
+      get: async (key: string) => {
+        if (!store.has(key)) throw new Error("ENOENT");
+        return store.get(key)!;
+      },
+      set: async (key: string, value: string) => {
+        store.set(key, value);
+      },
+      listKeys: async () => ["skills/demo/normal.md"],
+    } as unknown as Parameters<typeof updateLibraryIndex>[0]["resolver"];
+
+    await updateLibraryIndex({
+      resolver,
+      includeBuiltIn: false,
+      staticOnly: true,
+    });
+    const demoRaw = store.get("skills/index/v1/demo.json");
+    assert.ok(demoRaw);
+    const demoEntry = JSON.parse(demoRaw!) as SkillIndexEntry;
+    assert.strictEqual(demoEntry.quality.method, "static");
+    assert.strictEqual(demoEntry.quality.confidence, null);
+  });
+
+  it("judgeAfterIndex sets judged confidence when examples exist", async () => {
+    const store = new Map<string, string>();
+    const resolver = {
+      get: async (key: string) => {
+        if (!store.has(key)) throw new Error("ENOENT");
+        return store.get(key)!;
+      },
+      set: async (key: string, value: string) => {
+        store.set(key, value);
+      },
+      listKeys: async () => [],
+    } as unknown as Parameters<typeof updateLibraryIndex>[0]["resolver"];
+
+    const mockClient = {
+      ask: async () => ({
+        text: JSON.stringify({
+          schemaVersion: "ai.judge.v1",
+          pass: true,
+          maxPoints: 1,
+          lostPoints: 0.12,
+          scorePoints: 0.88,
+          scoreNormalized: 0.88,
+          threshold: 0.8,
+          ruleResults: [],
+          failedRules: [],
+          summary: "Looks good",
+        }),
+        usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        model: "openai/gpt-5-nano",
+      }),
+      testConnection: async () => true,
+    };
+
+    await updateLibraryIndex({
+      resolver,
+      includeBuiltIn: true,
+      staticOnly: true,
+      judgeAfterIndex: true,
+      client: mockClient as never,
+    });
+
+    const entryRaw = store.get("skills/index/v1/extractTopics.json");
+    assert.ok(entryRaw);
+    const entry = JSON.parse(entryRaw!) as SkillIndexEntry;
+    assert.strictEqual(entry.quality.method, "judged");
+    assert.strictEqual(entry.quality.confidence, 0.88);
+    assert.strictEqual(entry.quality.judgeScore, 0.88);
+    assert.ok(typeof entry.quality.judgedAt === "string");
   });
 });

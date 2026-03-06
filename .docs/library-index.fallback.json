@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "generatedAt": "2026-03-06T17:30:25.958Z",
+  "generatedAt": "2026-03-06T22:18:57.380Z",
   "generator": {
     "name": "light-skills-indexer",
     "mode": "normal"
@@ -32,6 +32,48 @@
     },
     {
       "$refKey": "skills/index/v1/translate.json"
+    },
+    {
+      "$refKey": "skills/index/v1/ai.ask.json"
+    },
+    {
+      "$refKey": "skills/index/v1/judge.json"
+    },
+    {
+      "$refKey": "skills/index/v1/compare.json"
+    },
+    {
+      "$refKey": "skills/index/v1/generateInstructions.json"
+    },
+    {
+      "$refKey": "skills/index/v1/optimizeInstructions.json"
+    },
+    {
+      "$refKey": "skills/index/v1/fixInstructions.json"
+    },
+    {
+      "$refKey": "skills/index/v1/generateRule.json"
+    },
+    {
+      "$refKey": "skills/index/v1/generateJudgeRules.json"
+    },
+    {
+      "$refKey": "skills/index/v1/raceModels.json"
+    },
+    {
+      "$refKey": "skills/index/v1/collectionMapping.json"
+    },
+    {
+      "$refKey": "skills/index/v1/validateFieldRelationship.json"
+    },
+    {
+      "$refKey": "skills/index/v1/suggestFieldRelationship.json"
+    },
+    {
+      "$refKey": "skills/index/v1/ai.normalize-judge-rules.v1.json"
+    },
+    {
+      "$refKey": "skills/index/v1/ai.aggregate-judge-feedback.v1.json"
     }
   ]
 }

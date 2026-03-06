@@ -1,15 +1,16 @@
 {
   "schemaVersion": "1.0-full",
-  "generatedAt": "2026-03-06T17:30:27.262Z",
+  "generatedAt": "2026-03-06T22:18:59.834Z",
   "basedOn": {
     "aggregateKey": "skills/index.v1.json",
-    "aggregateGeneratedAt": "2026-03-06T17:30:25.958Z",
+    "aggregateGeneratedAt": "2026-03-06T22:18:57.380Z",
     "aggregateSchemaVersion": "1.0",
-    "skillCount": 9
+    "skillCount": 23
   },
   "skills": [
     {
       "schemaVersion": "1.0",
+      "displayKind": "function",
       "id": "classify",
       "displayName": "Classify",
       "description": "--- FILE: skills/classify/normal.md (kind=instructions)",
@@ -18,11 +19,13 @@
         "contentHash": "sha256:06697e80c9261a8d8cfefcd5f108be6ca99a9a5c7ba5267fff87fbdf004c3f03",
         "embeddedFiles": [
           {
+            "key": "skills/classify/normal.md",
             "name": "normal.md",
             "kind": "instructions",
             "content": "Classify the input text into exactly one of: Category A or Category B. Return JSON: {\"categories\": [\"<selected category>\"], \"confidence\": <0-1>}."
           },
           {
+            "key": "skills/classify/weak.md",
             "name": "weak.md",
             "kind": "instructions",
             "content": "Classify input as either Category A or Category B. Respond only with JSON: {\"categories\": [\"SelectedCategory\"]}."
@@ -59,7 +62,8 @@
       "examples": [],
       "tags": [],
       "quality": {
-        "confidence": 0.4,
+        "confidence": null,
+        "method": "static",
         "notes": [
           "Static index; run with LLM (content:index) to enrich description and I/O schema"
         ]
@@ -67,6 +71,7 @@
     },
     {
       "schemaVersion": "1.0",
+      "displayKind": "function",
       "id": "cluster",
       "displayName": "Cluster",
       "description": "--- FILE: skills/cluster/normal.md (kind=instructions)",
@@ -75,11 +80,13 @@
         "contentHash": "sha256:6eae27a161018b46d1ac9c3ea094610b99050a0a43b8c0429fa78b0312f8f574",
         "embeddedFiles": [
           {
+            "key": "skills/cluster/normal.md",
             "name": "normal.md",
             "kind": "instructions",
             "content": "Group the items into semantic clusters. Identify the natural number of clusters. Provide a descriptive label for each cluster. For each cluster, retain the full original objects in an 'items' array. Respond with JSON containing a 'clusters' array."
           },
           {
+            "key": "skills/cluster/weak.md",
             "name": "weak.md",
             "kind": "instructions",
             "content": "Group items into semantic clusters and assign a descriptive label to each cluster. Respond with JSON containing a 'clusters' array (each entry includes a 'label') and an 'items' array with the full original objects unchanged."
@@ -116,7 +123,8 @@
       "examples": [],
       "tags": [],
       "quality": {
-        "confidence": 0.4,
+        "confidence": null,
+        "method": "static",
         "notes": [
           "Static index; run with LLM (content:index) to enrich description and I/O schema"
         ]
@@ -124,6 +132,7 @@
     },
     {
       "schemaVersion": "1.0",
+      "displayKind": "function",
       "id": "extractEntities",
       "displayName": "Extract Entities",
       "description": "--- FILE: skills/extractEntities/normal.md (kind=instructions)",
@@ -132,11 +141,13 @@
         "contentHash": "sha256:6d9998d717181071645ec53de76b9e812cc7703d04a928bc843181d8a25a4251",
         "embeddedFiles": [
           {
+            "key": "skills/extractEntities/normal.md",
             "name": "normal.md",
             "kind": "instructions",
             "content": "Extract named entities from the input text. Target entity types: Person, Organization, Location, Date, Product. For each entity, include the name, type, and a brief context. Return a JSON object with the exact shape: {\"entities\": [{\"name\": \"...\", \"type\": \"...\", \"context\": \"...\"}]}."
           },
           {
+            "key": "skills/extractEntities/weak.md",
             "name": "weak.md",
             "kind": "instructions",
             "content": "Skill: extractEntities. Mode: weak. Extract entities of types Person, Organization, Location, Date, Product from the input text. Output JSON only: {\"entities\": [{\"name\": \"...\", \"type\": \"...\"}]} No chat."
@@ -173,7 +184,8 @@
       "examples": [],
       "tags": [],
       "quality": {
-        "confidence": 0.4,
+        "confidence": null,
+        "method": "static",
         "notes": [
           "Static index; run with LLM (content:index) to enrich description and I/O schema"
         ]
@@ -181,6 +193,7 @@
     },
     {
       "schemaVersion": "1.0",
+      "displayKind": "function",
       "id": "extractTopics",
       "displayName": "Extract Topics",
       "description": "--- FILE: skills/extractTopics/normal.md (kind=instructions)",
@@ -189,11 +202,13 @@
         "contentHash": "sha256:ecc7add68d8ffd87b91f84264129c3632d66d72be2283ea6b0842c2507799bbe",
         "embeddedFiles": [
           {
+            "key": "skills/extractTopics/normal.md",
             "name": "normal.md",
             "kind": "instructions",
             "content": "Extract the most important topics from the provided text.\nReturn a maximum of 5 topics.\nRespond in JSON format with a \"topics\" array of strings."
           },
           {
+            "key": "skills/extractTopics/weak.md",
             "name": "weak.md",
             "kind": "instructions",
             "content": "Extract up to 5 topics from the text.\nJSON ONLY: {\"topics\": [\"Topic 1\", \"Topic 2\", ...]}\nNo explanation."
@@ -230,7 +245,8 @@
       "examples": [],
       "tags": [],
       "quality": {
-        "confidence": 0.4,
+        "confidence": null,
+        "method": "static",
         "notes": [
           "Static index; run with LLM (content:index) to enrich description and I/O schema"
         ]
@@ -238,6 +254,7 @@
     },
     {
       "schemaVersion": "1.0",
+      "displayKind": "function",
       "id": "matchLists",
       "displayName": "Match Lists",
       "description": "--- FILE: skills/matchLists/normal.md (kind=instructions)",
@@ -246,11 +263,13 @@
         "contentHash": "sha256:17ad6910ef052b9ca240e0fd0e617d5ffeb0fc521610389747a494c16310c2d9",
         "embeddedFiles": [
           {
+            "key": "skills/matchLists/normal.md",
             "name": "normal.md",
             "kind": "instructions",
             "content": "You're an AI assistant specialized in matching items from two lists by naming similarity and semantic relation. Your goal is to find the best match in list2 for each item in list1. Follow the user's matching criteria exactly. Ignore arbitrary IDs (like UUIDs) unless they are clearly shared. Do not map a single List2 item to more than one List1 item. Output a valid JSON object with this shape: {\"matches\": [{\"source\": <full object from list1>, \"target\": <full object from list2>, \"reason\": \"...\"}], \"unmatched\": [<full objects from list1 with no match>]}"
           },
           {
+            "key": "skills/matchLists/weak.md",
             "name": "weak.md",
             "kind": "instructions",
             "content": "Skill: matchLists. Mode: weak. Goal: match List 1 to List 2 by name and semantic similarity. Output exactly the JSON object: {\"matches\": [{\"source\": object, \"target\": object, \"reason\": \"string\"}], \"unmatched\": []}. Do not output text outside JSON. Use exact objects for source/target. Each List 2 item at most once."
@@ -287,7 +306,8 @@
       "examples": [],
       "tags": [],
       "quality": {
-        "confidence": 0.4,
+        "confidence": null,
+        "method": "static",
         "notes": [
           "Static index; run with LLM (content:index) to enrich description and I/O schema"
         ]
@@ -295,6 +315,7 @@
     },
     {
       "schemaVersion": "1.0",
+      "displayKind": "function",
       "id": "rank",
       "displayName": "Rank",
       "description": "--- FILE: skills/rank/normal.md (kind=instructions)",
@@ -303,11 +324,13 @@
         "contentHash": "sha256:c343880d9c5474a9950479aebaed31bab50b37ad67c3271a5989e89ecda2fb09",
         "embeddedFiles": [
           {
+            "key": "skills/rank/normal.md",
             "name": "normal.md",
             "kind": "instructions",
             "content": "Rank the given items by relevance to the query. For each item, provide a relevance score between 0 and 1 and a brief justification. Return JSON with a 'rankedItems' array. Each element's 'item' field must contain the full original object."
           },
           {
+            "key": "skills/rank/weak.md",
             "name": "weak.md",
             "kind": "instructions",
             "content": "Rank items by relevance to the query. For each item, provide a score (0-1) and a brief reason. Return a JSON object with a 'rankedItems' array; each element should include 'item' (full original object), 'score' (0-1), and 'reason'."
@@ -344,7 +367,8 @@
       "examples": [],
       "tags": [],
       "quality": {
-        "confidence": 0.4,
+        "confidence": null,
+        "method": "static",
         "notes": [
           "Static index; run with LLM (content:index) to enrich description and I/O schema"
         ]
@@ -352,6 +376,7 @@
     },
     {
       "schemaVersion": "1.0",
+      "displayKind": "function",
       "id": "sentiment",
       "displayName": "Sentiment",
       "description": "--- FILE: skills/sentiment/normal.md (kind=instructions)",
@@ -360,11 +385,13 @@
         "contentHash": "sha256:198cfc5e705e6d48248ecfffcec33f1a13ff802e0ed213bf43f01be9e2eb0a10",
         "embeddedFiles": [
           {
+            "key": "skills/sentiment/normal.md",
             "name": "normal.md",
             "kind": "instructions",
             "content": "Determine the sentiment of the provided text. Classify it as 'positive', 'negative', or 'neutral'. Return a JSON object with keys 'sentiment' and 'score', where 'score' is a number in [0,1]."
           },
           {
+            "key": "skills/sentiment/weak.md",
             "name": "weak.md",
             "kind": "instructions",
             "content": "Analyze the sentiment of the provided text and output a JSON object with keys sentiment and score, where sentiment is one of 'positive', 'negative', or 'neutral', and score is a number between 0 and 1."
@@ -401,7 +428,8 @@
       "examples": [],
       "tags": [],
       "quality": {
-        "confidence": 0.4,
+        "confidence": null,
+        "method": "static",
         "notes": [
           "Static index; run with LLM (content:index) to enrich description and I/O schema"
         ]
@@ -409,6 +437,7 @@
     },
     {
       "schemaVersion": "1.0",
+      "displayKind": "function",
       "id": "summarize",
       "displayName": "Summarize",
       "description": "--- FILE: skills/summarize/normal.md (kind=instructions)",
@@ -417,11 +446,13 @@
         "contentHash": "sha256:1f0392383dab06df646147673ebeea28c6427b436821f2cf99eaad821f8a7337",
         "embeddedFiles": [
           {
+            "key": "skills/summarize/normal.md",
             "name": "normal.md",
             "kind": "instructions",
             "content": "Summarize the following text in a concise paragraph and extract its key points. Return a JSON object with the keys 'summary' and 'keyPoints', where 'summary' is the concise paragraph and 'keyPoints' is an array of the main points."
           },
           {
+            "key": "skills/summarize/weak.md",
             "name": "weak.md",
             "kind": "instructions",
             "content": "Summarize the input text into a single concise paragraph. Return a JSON object with exactly two fields: 'summary' (the paragraph) and 'keyPoints' (an array of the main points). Do not include any other content or fields."
@@ -458,7 +489,8 @@
       "examples": [],
       "tags": [],
       "quality": {
-        "confidence": 0.4,
+        "confidence": null,
+        "method": "static",
         "notes": [
           "Static index; run with LLM (content:index) to enrich description and I/O schema"
         ]
@@ -466,6 +498,7 @@
     },
     {
       "schemaVersion": "1.0",
+      "displayKind": "function",
       "id": "translate",
       "displayName": "Translate",
       "description": "--- FILE: skills/translate/normal.md (kind=instructions)",
@@ -474,11 +507,13 @@
         "contentHash": "sha256:ec9b34d1bb4e930d80a88bd2cc7d589ee533bf915d5c27525d92a2f70bb87cf7",
         "embeddedFiles": [
           {
+            "key": "skills/translate/normal.md",
             "name": "normal.md",
             "kind": "instructions",
             "content": "Translate the given text into the target language, preserving tone and context. Detect the source language and include it in the response. Return a JSON object with the keys \\\"translatedText\\\" and \\\"detectedSourceLanguage\\\"."
           },
           {
+            "key": "skills/translate/weak.md",
             "name": "weak.md",
             "kind": "instructions",
             "content": "Translate the given text into the requested language, preserving tone and context. Respond in JSON with the keys \"translatedText\" and \"detectedSourceLanguage\"."
@@ -515,9 +550,1124 @@
       "examples": [],
       "tags": [],
       "quality": {
-        "confidence": 0.4,
+        "confidence": null,
+        "method": "static",
         "notes": [
           "Static index; run with LLM (content:index) to enrich description and I/O schema"
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "ai.ask",
+      "displayName": "AI Ask",
+      "description": "Run a generic AI prompt and return text output.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "ai.ask",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal",
+          "temperature": 0.7,
+          "maxTokens": 1200
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "prompt": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "weak",
+                "normal",
+                "strong",
+                "ultra"
+              ]
+            },
+            "maxTokens": {
+              "type": "number"
+            },
+            "temperature": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "prompt"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "judge",
+      "displayName": "Judge",
+      "description": "Score a response against weighted rules.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "judge",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "instructions": {
+              "type": "string"
+            },
+            "response": {
+              "type": "string"
+            },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "rule": {
+                    "type": "string"
+                  },
+                  "weight": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "rule",
+                  "weight"
+                ]
+              }
+            },
+            "threshold": {
+              "type": "number"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "strong"
+              ]
+            }
+          },
+          "required": [
+            "instructions",
+            "response",
+            "rules",
+            "threshold"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schemaVersion": {
+              "type": "string"
+            },
+            "pass": {
+              "type": "boolean"
+            },
+            "scoreNormalized": {
+              "type": "number"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "pass",
+            "scoreNormalized",
+            "summary"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "compare",
+      "displayName": "Compare",
+      "description": "Compare multiple responses and rank the best candidate.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "compare",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "instructions": {
+              "type": "string"
+            },
+            "responses": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "text"
+                ]
+              }
+            },
+            "threshold": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "instructions",
+            "responses",
+            "threshold"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schemaVersion": {
+              "type": "string"
+            },
+            "ranking": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            },
+            "bestId": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "ranking",
+            "bestId",
+            "summary"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "generateInstructions",
+      "displayName": "Generate Instructions",
+      "description": "Generate and iteratively improve instructions from test cases.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "generateInstructions",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "seedInstructions": {
+              "type": "string"
+            },
+            "testCases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            }
+          },
+          "required": [
+            "seedInstructions",
+            "testCases"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "achieved": {
+              "type": "boolean"
+            },
+            "best": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "required": []
+            }
+          },
+          "required": [
+            "achieved",
+            "best"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "optimizeInstructions",
+      "displayName": "Optimize Instructions",
+      "description": "Rewrite instructions to improve quality.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "optimizeInstructions",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "instructions": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "instructions"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "optimized": {
+              "type": "string"
+            },
+            "changes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "optimized"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "fixInstructions",
+      "displayName": "Fix Instructions",
+      "description": "Fix instructions based on judge feedback.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "fixInstructions",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "instructions": {
+              "type": "string"
+            },
+            "judgeFeedback": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "required": []
+            }
+          },
+          "required": [
+            "instructions",
+            "judgeFeedback"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fixedInstructions": {
+              "type": "string"
+            },
+            "changes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "fixedInstructions"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "generateRule",
+      "displayName": "Generate Rule",
+      "description": "Generate one weighted judge rule from instructions/context.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "generateRule",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "instructions": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "instructions"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rule": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "rule": {
+                  "type": "string"
+                },
+                "weight": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "rule",
+                "weight"
+              ]
+            }
+          },
+          "required": [
+            "rule"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "generateJudgeRules",
+      "displayName": "Generate Judge Rules",
+      "description": "Generate a set of weighted judge rules.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "generateJudgeRules",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "instructions": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "instructions"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "rule": {
+                    "type": "string"
+                  },
+                  "weight": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "rule",
+                  "weight"
+                ]
+              }
+            }
+          },
+          "required": [
+            "rules"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "raceModels",
+      "displayName": "Race Models",
+      "description": "Benchmark candidate models on shared test cases.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "raceModels",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "taskName": {
+              "type": "string"
+            },
+            "testCases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            },
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            }
+          },
+          "required": [
+            "taskName",
+            "testCases",
+            "models"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ranking": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            },
+            "bestModelId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ranking",
+            "bestModelId"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "collectionMapping",
+      "displayName": "Collection Mapping",
+      "description": "Infer collection and field mappings between two schemas.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "collectionMapping",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "left": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "required": []
+            },
+            "right": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "required": []
+            }
+          },
+          "required": [
+            "left",
+            "right"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schemaVersion": {
+              "type": "string"
+            },
+            "collectionMatchConfidence": {
+              "type": "number"
+            },
+            "fieldMappings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "collectionMatchConfidence",
+            "fieldMappings"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "validateFieldRelationship",
+      "displayName": "Validate Field Relationship",
+      "description": "Validate whether two fields represent the same semantic relationship.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "validateFieldRelationship",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "leftField": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "required": []
+            },
+            "rightField": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "required": []
+            }
+          },
+          "required": [
+            "leftField",
+            "rightField"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "valid": {
+              "type": "boolean"
+            },
+            "confidence": {
+              "type": "number"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "valid"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "suggestFieldRelationship",
+      "displayName": "Suggest Field Relationship",
+      "description": "Suggest relationship type and confidence between two fields.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "suggestFieldRelationship",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "leftField": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "required": []
+            },
+            "rightField": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {},
+              "required": []
+            }
+          },
+          "required": [
+            "leftField",
+            "rightField"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "relationship": {
+              "type": "string"
+            },
+            "confidence": {
+              "type": "number"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "relationship"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "ai.normalize-judge-rules.v1",
+      "displayName": "Normalize Judge Rules",
+      "description": "Normalize and sanitize judge rules.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "ai.normalize-judge-rules.v1",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "rule": {
+                    "type": "string"
+                  },
+                  "weight": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "rule",
+                  "weight"
+                ]
+              }
+            }
+          },
+          "required": [
+            "rules"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "rule": {
+                    "type": "string"
+                  },
+                  "weight": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "rule",
+                  "weight"
+                ]
+              }
+            }
+          },
+          "required": [
+            "rules"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
+        ]
+      }
+    },
+    {
+      "schemaVersion": "1.0",
+      "displayKind": "function",
+      "id": "ai.aggregate-judge-feedback.v1",
+      "displayName": "Aggregate Judge Feedback",
+      "description": "Aggregate multiple judge outputs into a single feedback report.",
+      "source": {
+        "kind": "built-in"
+      },
+      "runtime": {
+        "callName": "ai.aggregate-judge-feedback.v1",
+        "modes": [
+          "weak",
+          "normal",
+          "strong"
+        ],
+        "defaults": {
+          "mode": "normal"
+        }
+      },
+      "io": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "evaluations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            }
+          },
+          "required": [
+            "evaluations"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "summary": {
+              "type": "string"
+            },
+            "issues": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "summary",
+            "issues"
+          ]
+        }
+      },
+      "examples": [],
+      "tags": [
+        "built-in"
+      ],
+      "quality": {
+        "confidence": null,
+        "method": "not-judged",
+        "notes": [
+          "No quality judge run has been recorded for this built-in function yet."
         ]
       }
     }

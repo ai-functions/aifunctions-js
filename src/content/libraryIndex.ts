@@ -6,6 +6,9 @@ import type { ContentResolver } from "nx-content";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import type { Client } from "../core/types.js";
+import { getBuiltInAbilityManifest } from "../../functions/builtinManifest.js";
+import type { BuiltInAbilityEntry } from "../../functions/builtinManifest.js";
 
 const DEFAULT_INDEX_KEY = "skills/index.v1.json";
 /** Path relative to process.cwd() for fallback when content has no index. */
@@ -22,6 +25,10 @@ export type SkillSource = {
   contentPrefix?: string;
   files: SourceFile[];
   contentHash: string;
+};
+
+export type BuiltInSkillSource = {
+  kind: "built-in";
 };
 
 export type SkillRuntime = {
@@ -43,17 +50,29 @@ export type SkillIO = {
   output: RestrictedJsonSchemaObject;
 };
 
+export type SkillQualityMethod = "not-judged" | "static" | "llm-inferred" | "judged";
+
+export type SkillQuality = {
+  confidence: number | null;
+  method: SkillQualityMethod;
+  notes: string[];
+  judgedAt?: string;
+  judgeScore?: number;
+};
+
 export type SkillIndexEntry = {
   schemaVersion: string;
+  /** Public-facing canonical kind for an ability. */
+  displayKind?: "function";
   id: string;
   displayName: string;
   description: string;
-  source: SkillSource;
+  source: SkillSource | BuiltInSkillSource;
   runtime: SkillRuntime;
   io: SkillIO;
   examples?: Array<{ input: Record<string, unknown>; output: Record<string, unknown> }>;
   tags?: string[];
-  quality: { confidence: number; notes: string[] };
+  quality: SkillQuality;
 };
 
 export type AggregateIndex = {
@@ -98,6 +117,12 @@ export type UpdateLibraryIndexOptions = {
   force?: boolean;
   /** When true, skip LLM and build index from content only (static entries). Ensures library is always generated for visibility. */
   staticOnly?: boolean;
+  /** When true (default), merge built-in abilities into the generated index. */
+  includeBuiltIn?: boolean;
+  /** When true, run post-index quality judge and persist judged confidence where possible. */
+  judgeAfterIndex?: boolean;
+  /** Optional client used when judgeAfterIndex=true. */
+  client?: Client;
 };
 
 export type UpdateLibraryIndexReport = {
@@ -152,6 +177,39 @@ const MINIMAL_IO_SCHEMA: RestrictedJsonSchemaObject = {
   required: [],
 };
 
+function asContentSource(source: SkillIndexEntry["source"]): SkillSource | null {
+  if ("kind" in source && source.kind === "built-in") return null;
+  return source as SkillSource;
+}
+
+export function getBuiltInAbilityEntries(): SkillIndexEntry[] {
+  const manifest = getBuiltInAbilityManifest();
+  return manifest.map((entry: BuiltInAbilityEntry) => ({
+    schemaVersion: "1.0",
+    displayKind: "function",
+    id: entry.id,
+    displayName: entry.displayName,
+    description: entry.description,
+    source: { kind: "built-in" },
+    runtime: {
+      callName: entry.runtime.callName,
+      modes: entry.runtime.modes,
+      defaults: entry.runtime.defaults,
+    },
+    io: {
+      input: entry.io.input,
+      output: entry.io.output,
+    },
+    examples: entry.examples,
+    tags: entry.tags,
+    quality: {
+      confidence: entry.quality.confidence,
+      method: entry.quality.method,
+      notes: entry.quality.notes,
+    },
+  }));
+}
+
 /**
  * Build a valid index entry from content only (no LLM). Used so the shared library
  * is always generated for visibility and usability of functions, then optionally
@@ -168,6 +226,7 @@ function buildStaticIndexEntry(
   description = description.replace(/^#+\s*/, "").trim().slice(0, 240) || `Skill: ${skillId}`;
   return {
     schemaVersion: "1.0",
+    displayKind: "function",
     id: skillId,
     displayName,
     description,
@@ -187,7 +246,11 @@ function buildStaticIndexEntry(
     },
     examples: [],
     tags: [],
-    quality: { confidence: 0.4, notes: ["Static index; run with LLM (content:index) to enrich description and I/O schema"] },
+    quality: {
+      confidence: null,
+      method: "static",
+      notes: ["Static index; run with LLM (content:index) to enrich description and I/O schema"],
+    },
   };
 }
 
@@ -220,15 +283,20 @@ export function validateSkillIndexEntry(entry: unknown): ValidationResult {
   }
   const e = entry as Record<string, unknown>;
   if (e.schemaVersion !== "1.0") err.push("schemaVersion must be '1.0'");
+  if (e.displayKind !== undefined && e.displayKind !== "function") err.push("displayKind, when provided, must be 'function'");
   if (typeof e.id !== "string" || !e.id) err.push("id is required and must be non-empty string");
   if (typeof e.displayName !== "string" || !e.displayName) err.push("displayName is required");
   if (typeof e.description !== "string" || !e.description) err.push("description is required");
   if (!e.source || typeof e.source !== "object") err.push("source is required");
   else {
     const s = e.source as Record<string, unknown>;
-    if (!Array.isArray(s.files)) err.push("source.files must be an array");
-    if (typeof (s as { contentHash?: string }).contentHash !== "string" || !(s as { contentHash: string }).contentHash.startsWith("sha256:"))
-      err.push("source.contentHash must be 'sha256:...'");
+    if (s.kind === "built-in") {
+      // built-in source shape is valid
+    } else {
+      if (!Array.isArray(s.files)) err.push("source.files must be an array");
+      if (typeof (s as { contentHash?: string }).contentHash !== "string" || !(s as { contentHash: string }).contentHash.startsWith("sha256:"))
+        err.push("source.contentHash must be 'sha256:...'");
+    }
   }
   if (!e.runtime || typeof e.runtime !== "object") err.push("runtime is required");
   else if (typeof (e.runtime as { callName?: string }).callName !== "string")
@@ -241,9 +309,17 @@ export function validateSkillIndexEntry(entry: unknown): ValidationResult {
   }
   if (!e.quality || typeof e.quality !== "object") err.push("quality is required");
   else {
-    const q = e.quality as { confidence?: unknown };
-    if (typeof q.confidence !== "number" || q.confidence < 0 || q.confidence > 1)
-      err.push("quality.confidence must be a number 0..1");
+    const q = e.quality as { confidence?: unknown; method?: unknown };
+    if (q.confidence !== null && (typeof q.confidence !== "number" || q.confidence < 0 || q.confidence > 1))
+      err.push("quality.confidence must be null or number 0..1");
+    if (
+      q.method !== "not-judged" &&
+      q.method !== "static" &&
+      q.method !== "llm-inferred" &&
+      q.method !== "judged"
+    ) {
+      err.push("quality.method must be one of: not-judged, static, llm-inferred, judged");
+    }
   }
   return err.length ? { valid: false, errors: err } : { valid: true };
 }
@@ -335,6 +411,9 @@ export async function updateLibraryIndex(
     incremental = false,
     force = false,
     staticOnly = false,
+    includeBuiltIn = true,
+    judgeAfterIndex = false,
+    client,
   } = options;
 
   const report: UpdateLibraryIndexReport = {
@@ -380,7 +459,8 @@ export async function updateLibraryIndex(
     const concatenated = contentBlocks.join("\n\n");
     const hash = contentHash(concatenated);
     const existing = existingByRef.get(skillId);
-    if (incremental && existing?.source?.contentHash === hash) {
+    const existingSource = existing ? asContentSource(existing.source) : null;
+    if (incremental && existingSource?.contentHash === hash) {
       report.stats.skillsUnchanged++;
       refKeys.push(refKey);
       continue;
@@ -478,6 +558,71 @@ export async function updateLibraryIndex(
     refKeys.push(refKey);
   }
 
+  if (includeBuiltIn) {
+    const builtInEntries = getBuiltInAbilityEntries();
+    const seenIds = new Set(refKeys.map((key) => key.replace(`${INDEX_PREFIX}`, "").replace(/\.json$/, "")));
+    for (const entry of builtInEntries) {
+      if (seenIds.has(entry.id)) continue;
+      const refKey = `${INDEX_PREFIX}${entry.id}.json`;
+      const entryValidation = validateSkillIndexEntry(entry);
+      if (!entryValidation.valid) {
+        report.stats.skillsErrored++;
+        report.errors.push({ skillId: entry.id, reason: entryValidation.errors?.join("; ") ?? "Built-in entry validation failed" });
+        continue;
+      }
+      if (!dryRun) {
+        await resolver.set(refKey, JSON.stringify(entry, null, 2));
+      }
+      report.stats.skillsUpdated++;
+      refKeys.push(refKey);
+      seenIds.add(entry.id);
+    }
+  }
+
+  if (judgeAfterIndex && !dryRun) {
+    const { judgeV1 } = await import("../../functions/judge/judgeV1.js");
+    for (const refKey of refKeys) {
+      let parsedEntry: SkillIndexEntry | null = null;
+      try {
+        const raw = await resolver.get(refKey);
+        parsedEntry = JSON.parse(typeof raw === "string" ? raw : "{}") as SkillIndexEntry;
+      } catch {
+        continue;
+      }
+      if (!parsedEntry) continue;
+      const firstExample = parsedEntry.examples?.[0];
+      if (!firstExample) continue;
+      try {
+        const score = await judgeV1({
+          instructions: parsedEntry.description,
+          response: JSON.stringify(firstExample.output ?? {}, null, 2),
+          rules: [{ rule: "Output must be valid and aligned with declared io.output schema.", weight: 1 }],
+          threshold: 0.8,
+          mode: "normal",
+          client,
+        });
+        parsedEntry.quality = {
+          ...parsedEntry.quality,
+          confidence: score.scoreNormalized,
+          method: "judged",
+          judgedAt: new Date().toISOString(),
+          judgeScore: score.scoreNormalized,
+          notes: [
+            ...(parsedEntry.quality.notes ?? []),
+            "Quality confidence updated from judge.v1 score.",
+          ],
+        };
+        await resolver.set(refKey, JSON.stringify(parsedEntry, null, 2));
+      } catch (e) {
+        if (client) {
+          throw new Error(`judgeAfterIndex failed for ${parsedEntry.id}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        // Keep original quality if judge fails without an explicit client.
+      }
+    }
+  }
+
+  report.stats.skillsTotal = refKeys.length;
   report.refKeys = refKeys;
   if (!dryRun) {
     const aggregate: AggregateIndex = {
@@ -540,6 +685,7 @@ function wrapLlmOutput(
 ): SkillIndexEntry {
   return {
     schemaVersion: "1.0",
+    displayKind: "function",
     id: skillId,
     displayName: llm.displayName ?? skillId,
     description: llm.description ?? "",
@@ -559,7 +705,9 @@ function wrapLlmOutput(
     },
     examples: llm.examples ?? [],
     tags: llm.tags ?? [],
-    quality: llm.quality ?? { confidence: 0.5, notes: [] },
+    quality: llm.quality
+      ? { confidence: llm.quality.confidence, method: "llm-inferred", notes: llm.quality.notes }
+      : { confidence: null, method: "llm-inferred", notes: ["LLM output missing quality metadata."] },
   };
 }
 

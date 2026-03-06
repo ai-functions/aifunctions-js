@@ -11,6 +11,9 @@ import {
   getSkillsResolver,
   getLibraryIndex,
   updateLibraryIndex,
+  buildFullLibrarySnapshot,
+  writeFullLibrarySnapshot,
+  DEFAULT_FULL_LIBRARY_DOCS_PATH,
   createClient,
   getSkillInstructions,
   setSkillInstructions,
@@ -250,7 +253,7 @@ async function handleRun(
   const validateOption = rawBody?.options?.validate;
   const traceOption = rawBody?.options?.trace === true;
   if (typeof skill !== "string" || !skill.trim()) {
-    sendError(res, 400, "skill must be a non-empty string", "INVALID_INPUT", rlHeaders);
+    sendError(res, 400, "function must be a non-empty string", "INVALID_INPUT", rlHeaders);
     return;
   }
   const resolver = getSkillsResolver();
@@ -324,8 +327,8 @@ async function handleRun(
       return;
     }
     const message = e instanceof Error ? e.message : String(e);
-    if (message.includes("Unknown skill")) {
-      sendError(res, 404, `Skill '${skill.trim()}' not found`, "SKILL_NOT_FOUND", rlHeaders);
+    if (message.includes("Unknown skill") || message.includes("Unknown function")) {
+      sendError(res, 404, `Function '${skill.trim()}' not found`, "SKILL_NOT_FOUND", rlHeaders);
     } else if (message.includes("No race profile") || message.includes("Run a race first")) {
       sendError(res, 422, message, "NO_RACE_PROFILE", rlHeaders);
     } else {
@@ -386,7 +389,7 @@ async function handleRunVersioned(
       return;
     }
     const message = e instanceof Error ? e.message : String(e);
-    if (message.includes("Unknown skill") || message.includes("not support version")) {
+    if (message.includes("Unknown skill") || message.includes("Unknown function") || message.includes("not support version")) {
       sendError(res, 422, message, "VERSION_NOT_AVAILABLE", rlHeaders);
     } else {
       sendError(res, 500, message, "RUN_ERROR", rlHeaders);
@@ -448,7 +451,7 @@ async function handleSkillDetail(res: import("node:http").ServerResponse, name: 
     const resolver = getSkillsResolver();
     const names = await getSkillNamesAsync(resolver);
     if (!names.includes(name)) {
-      sendError(res, 404, `Skill '${name}' not found`, "SKILL_NOT_FOUND");
+      sendError(res, 404, `Function '${name}' not found`, "SKILL_NOT_FOUND");
       return;
     }
     let entry: Record<string, unknown> | null = null;
@@ -1496,6 +1499,47 @@ async function handleContentIndex(res: import("node:http").ServerResponse, body:
   }
 }
 
+async function handleContentIndexFull(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
+  const b = (body as {
+    prefix?: string;
+    mode?: "weak" | "normal" | "strong";
+    model?: string;
+    staticOnly?: boolean;
+    writeDocsFallback?: boolean;
+  }) ?? {};
+  const resolver = getSkillsResolver();
+  try {
+    const report = await updateLibraryIndex({
+      resolver,
+      prefix: b.prefix ?? "skills/",
+      mode: b.mode ?? "normal",
+      model: b.model,
+      dryRun: false,
+      staticOnly: b.staticOnly ?? false,
+    });
+    const fullSnapshot = await buildFullLibrarySnapshot({ resolver });
+    let docsFallback: { written: boolean; path?: string } = { written: false };
+    if (b.writeDocsFallback !== false) {
+      const outPath = path.join(rootDir, DEFAULT_FULL_LIBRARY_DOCS_PATH);
+      await writeFullLibrarySnapshot(fullSnapshot, outPath);
+      docsFallback = { written: true, path: DEFAULT_FULL_LIBRARY_DOCS_PATH };
+    }
+    const skills: string[] = (report.refKeys ?? []).map((key: string) => {
+      const m = key.match(/[^/]+\.json$/);
+      return m ? m[0].replace(".json", "") : key;
+    });
+    sendOk(res, {
+      indexed: report.stats?.skillsTotal ?? 0,
+      skills,
+      errors: report.errors?.map((e: { reason?: string }) => e.reason ?? String(e)) ?? [],
+      fullSnapshot,
+      docsFallback,
+    });
+  } catch (e) {
+    sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");
+  }
+}
+
 async function handleContentFixtures(res: import("node:http").ServerResponse, body: unknown): Promise<void> {
   const b = (body as { skillName?: string }) ?? {};
   const resolver = getSkillsResolver();
@@ -1565,12 +1609,12 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
       endpoints: {
         "GET /health": "Health check",
         "GET /config/modes": "Server mode→model mapping (weak, normal, strong, ultra)",
-        "GET /skills": "List skills", "GET /skills/:name": "Skill detail",
-        "POST /skills/:name/run": "Run skill",
-        "POST /run": "Run skill (body: { skill, input, options })",
+        "GET /skills": "List functions (legacy alias endpoint)", "GET /skills/:name": "Function detail (legacy alias endpoint)",
+        "POST /skills/:name/run": "Run function (legacy alias endpoint)",
+        "POST /run": "Run function (body: { skill, input, options })",
         "POST /optimize/instructions": "Optimize raw instructions",
-        "POST /optimize/skill": "Optimize one skill in-place",
-        "POST /optimize/batch": "Optimize multiple skills (job)",
+        "POST /optimize/skill": "Optimize one function in-place",
+        "POST /optimize/batch": "Optimize multiple functions (job)",
         "POST /optimize/judge": "Score a response against rules",
         "POST /optimize/rules": "Generate judge rules from examples or instructions",
         "POST /optimize/rules-optimize": "Optimize existing judge rules from examples with rationale (append/replace)",
@@ -1581,6 +1625,7 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
         "GET /models/available": "List models available via OpenRouter",
         "GET /activity": "Server-side activity log (query: from, to, functionId, projectId, model, limit)",
         "POST /content/sync": "Content sync", "POST /content/index": "Build library index",
+        "POST /content/index/full": "Build + return full embedded library index",
         "POST /content/fixtures": "Run fixtures", "POST /content/layout-lint": "Layout lint",
         "GET /functions": "List functions", "POST /functions": "Create function",
         "POST /functions/generate-examples": "Generate good/bad examples from description",
@@ -1737,6 +1782,7 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
   // --- /content/* ---
   if (pathStr === "/content/sync" && method === "POST") { try { const body = await readJsonBody(req); await handleContentSync(res, body); } catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); } return; }
   if (pathStr === "/content/index" && method === "POST") { try { const body = await readJsonBody(req); await handleContentIndex(res, body); } catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); } return; }
+  if (pathStr === "/content/index/full" && method === "POST") { try { const body = await readJsonBody(req); await handleContentIndexFull(res, body); } catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); } return; }
   if (pathStr === "/content/fixtures" && method === "POST") { try { const body = await readJsonBody(req); await handleContentFixtures(res, body); } catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); } return; }
   if (pathStr === "/content/layout-lint" && method === "POST") { try { await handleContentLayoutLint(res); } catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); } return; }
 
@@ -1992,7 +2038,7 @@ server.listen(PORT, () => {
   console.log("  GET/POST /functions, GET /functions/:id");
   console.log("  POST /functions/:id:{optimize,validate,release,push}");
   console.log("  GET /functions/:id/{versions,test-cases}, PUT /functions/:id/test-cases");
-  console.log("  POST /race/models, POST /content/{sync,index,fixtures,layout-lint}");
+  console.log("  POST /race/models, POST /content/{sync,index,index/full,fixtures,layout-lint}");
   console.log("  GET /jobs, GET /jobs/:id, GET /jobs/:id/logs");
   console.log("  GET /analytics/openrouter/{credits,generations}");
   console.log("  GET /analytics/openai/{usage,costs}  (requires OPENAI_ADMIN_KEY)");

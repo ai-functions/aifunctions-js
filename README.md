@@ -3,7 +3,13 @@
 **Turn prompts into real functions** — typed I/O, JSON-safe execution, evaluation, and instruction optimization.
 
 - Use it as an **npm library** (you're in full control; no proxy required).
-- Or run the included **stateless REST server** to expose skills over HTTP and manage the full function lifecycle.
+- Or run the included **stateless REST server** to expose functions over HTTP and manage the full function lifecycle.
+
+### Terminology
+
+- **Function**: canonical public term for an ability.
+- **Skill**: internal/content-store alias for the same ability (file path under `skills/<id>/...`).
+- `/skills/*` endpoints are kept for backward compatibility and act as aliases for function operations.
 
 ---
 
@@ -61,7 +67,7 @@ const r = await matchLists({
 });
 ```
 
-### 2) Run any skill by name
+### 2) Run any function by name
 
 ```ts
 import { run } from "aifunctions-js/functions";
@@ -74,9 +80,9 @@ const result = await run("extract-invoice-lines", { text: invoiceText });
 
 ## Core concepts
 
-### Skill packs (file-based prompts)
+### Function packs (file-based prompts)
 
-Skills live as files in a content store (git repo or local folder):
+Functions live as files in a content store (git repo or local folder):
 
 ```
 skills/<skillId>/weak      # local/cheap instructions
@@ -269,7 +275,7 @@ TRANSFORMERS_JS_MODEL_ID=Xenova/distilbart-cnn-6-6
 
 ## REST API (optional, stateless)
 
-Expose skills and the full functions lifecycle over HTTP. Authoritative request/response shapes: [docs/API_CONTRACT.md](docs/API_CONTRACT.md). Server–contract sync status: [docs/CONTRACT_SYNC.md](docs/CONTRACT_SYNC.md).
+Expose functions and the full lifecycle over HTTP. Authoritative request/response shapes: [docs/API_CONTRACT.md](docs/API_CONTRACT.md). Server–contract sync status: [docs/CONTRACT_SYNC.md](docs/CONTRACT_SYNC.md).
 
 ```bash
 npm run build && npm run serve
@@ -293,8 +299,8 @@ GET  /config/modes            server mode→model mapping → { weak, normal, st
 POST /run                     { skill, input, options } → { result, usage }
 POST /skills/:name/run        { input, options }        → { result, usage }
 POST /functions/:id/run       { input, options }        → { result, usage, requestId, draft?, trace? }
-GET  /skills                  list skills + metadata
-GET  /skills/:name            skill detail
+GET  /skills                  list functions + metadata (legacy alias route)
+GET  /skills/:name            function detail (legacy alias route)
 GET  /functions               list functions
 GET  /functions/:id           function detail with status, version, last validation, currentInstructions, currentRules, currentRulesCount
 ```
@@ -367,11 +373,12 @@ POST /content/layout-lint
 
 ### Cost estimation
 
-All responses include `usage.estimatedCost` (USD) when cost can be determined:
+All responses include `usage.costEstimate` with machine-readable cost status, confidence, reason, and source metadata.
 
-- **OpenRouter:** uses the `cost` field returned directly in the response (exact, no math required).
-- **OpenAI models via static table:** falls back to `data/openai-cost.json`, a bundled pricing table accurate as of **March 5th 2026**. Prices may change over time. A future version will source pricing from a live API so the table stays current automatically.
-- **Other models:** cost is omitted when neither source applies.
+- `usage.estimatedCost` is still returned for backward compatibility and mirrors `usage.costEstimate.amountUsd` when available.
+- **OpenRouter exact cost:** when provider response includes `usage.cost`, `costEstimate.status="available"` and `source="provider-response"`.
+- **Bundled pricing fallback:** OpenAI models can be estimated from `data/openai-cost.json` (`priceVersion: "openai-cost@2026-03-05"`), with `status="estimated"` and `source="provider-pricing-registry"`.
+- **Unavailable pricing:** when cost cannot be computed, `amountUsd` is `null` and `costEstimate` includes `status="unavailable"` with a deterministic `reasonCode` (`BACKEND_NO_PRICING`, `MODEL_PRICING_MISSING`, `PRICE_LOOKUP_FAILED`, `USAGE_INCOMPLETE`, or `NOT_COMPUTED`).
 
 ---
 
@@ -416,6 +423,14 @@ POST /functions/extract.requirements/run
   "model": "openai/gpt-5-nano",
   "latencyMs": 1430,
   "estimatedCost": 0.000147,
+  "costEstimate": {
+    "amountUsd": 0.000147,
+    "status": "estimated",
+    "confidence": "medium",
+    "source": "provider-pricing-registry",
+    "priceVersion": "openai-cost@2026-03-05",
+    "reason": "Estimated using bundled OpenAI pricing table."
+  },
   "functionId": "extract.requirements",
   "projectId": "cognni-prod",
   "traceId": "req-983741",
