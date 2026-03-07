@@ -20,25 +20,25 @@ This document describes the **library indexing + auto-update** feature: a determ
 
 ### Index storage
 
-- **Aggregate (runtime load):** `skills/index.v1.json` — single file with `skills[]` array of `{ "$refKey": "skills/index/v1/<skillId>.json" }`.
-- **Per-skill (canonical):** `skills/index/v1/<skillId>.json` — one file per skill for merge-friendliness.
-- **Meta/report:** `skills/index/v1/_meta.json` — generation stats and errors.
+- **Aggregate (runtime load):** `functions/index.v1.json` — single file with `skills[]` array of `{ "$refKey": "functions/index/v1/<skillId>.json" }`.
+- **Per-function (canonical):** `functions/index/v1/<skillId>.json` — one file per function for merge-friendliness.
+- **Meta/report:** `functions/index/v1/_meta.json` — generation stats and errors.
 
 All under content root (nx-content), so the index is shipped via Git/local like other content.
 
 ### What gets scanned
 
-- `skills/` subtree via `resolver.listKeys('skills/')`: instructions, rules, task prompts. Keys are grouped by skill id (folder or file prefix).
+- `functions/` subtree via `resolver.listKeys('functions/')`: instructions, rules, task prompts. Keys are grouped by function id (folder-based only).
 
 ### Key-to-entity mapping
 
-- Each skill entity: one **canonical id** (from key path), one or more **source keys** (instructions, rules, prompt). Use nx-content helpers (`skillInstructionsFileKey`, `skillRulesFileKey`, `skillInstructionsKeyForMode`) where possible.
+- Each function entity: one **canonical id** (from key path), one or more **source keys** (instructions, rules, prompt). Use folder-based keys: `skillInstructionsKeyForMode`, `skillRulesKey` (e.g. `functions/<id>/strong`, `functions/<id>/rules`).
 
 ## Index JSON schema (v1)
 
 See **`docs/skills-index.schema.v1.json`** for the exact contract. Summary:
 
-### Per-skill `skills/index/v1/<skillId>.json`
+### Per-function `functions/index/v1/<skillId>.json`
 
 | Field | Required | Description |
 |-------|----------|-------------|

@@ -1,10 +1,12 @@
 /**
- * Layout lint: enforce canonical folder-based skill content. No root-level *-instructions.md / *-rules.json.
+ * Layout lint: enforce canonical folder-based function content under functions/.
+ * No root-level *-instructions.md / *-rules.json.
  * Callable from CLI (scripts/lintContentLayout.ts) and REST (POST /content/layout-lint).
  */
 import type { ContentResolver } from "nx-content";
 
-const FORBIDDEN_ROOT_PATTERN = /^skills\/[^/]+-(?:instructions\.md|rules\.json)$/;
+const CONTENT_PREFIX = "functions/";
+const FORBIDDEN_ROOT_PATTERN = /^functions\/[^/]+-(?:instructions\.md|rules\.json)$/;
 
 export type LayoutLintReport = {
   ok: boolean;
@@ -15,19 +17,19 @@ export async function runLayoutLint(resolver: ContentResolver): Promise<LayoutLi
   const errors: string[] = [];
   let keys: string[];
   try {
-    keys = await resolver.listKeys("skills/");
+    keys = await resolver.listKeys(CONTENT_PREFIX);
   } catch (e) {
-    return { ok: false, errors: [`Failed to list skills/: ${e instanceof Error ? e.message : String(e)}`] };
+    return { ok: false, errors: [`Failed to list ${CONTENT_PREFIX}: ${e instanceof Error ? e.message : String(e)}`] };
   }
 
   for (const key of keys) {
     const normalized = key.replace(/\\/g, "/").trim();
-    if (!normalized.startsWith("skills/")) continue;
-    const parts = normalized.slice("skills/".length).split("/").filter(Boolean);
+    if (!normalized.startsWith(CONTENT_PREFIX)) continue;
+    const parts = normalized.slice(CONTENT_PREFIX.length).split("/").filter(Boolean);
     if (FORBIDDEN_ROOT_PATTERN.test(normalized)) {
       errors.push(`Forbidden root-level key (use folder-based): ${normalized}`);
     } else if (parts.length === 1) {
-      errors.push(`Key must be under a skill folder (skills/<id>/...): ${normalized}`);
+      errors.push(`Key must be under a function folder (functions/<id>/...): ${normalized}`);
     }
   }
 

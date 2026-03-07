@@ -10,8 +10,6 @@ import {
     getSkillsResolver,
     skillInstructionsKeyForMode,
     skillRulesKey,
-    skillInstructionsFileKey,
-    skillRulesFileKey,
     resolveSkillInstructions,
     resolveSkillRules,
     getSkillInstructions,
@@ -41,32 +39,24 @@ describe("skill key helpers", () => {
     it("skillInstructionsKeyForMode builds folder key; normal maps to strong", () => {
         assert.strictEqual(
             skillInstructionsKeyForMode("extractTopics", "normal"),
-            "skills/extractTopics/strong"
+            "functions/extractTopics/strong"
         );
         assert.strictEqual(
             skillInstructionsKeyForMode("extractTopics", "strong"),
-            "skills/extractTopics/strong"
+            "functions/extractTopics/strong"
         );
         assert.strictEqual(
             skillInstructionsKeyForMode("extractTopics", "weak"),
-            "skills/extractTopics/weak"
+            "functions/extractTopics/weak"
         );
         assert.strictEqual(
             skillInstructionsKeyForMode("ai.judge.v1", "ultra"),
-            "skills/ai.judge.v1/ultra"
+            "functions/ai.judge.v1/ultra"
         );
     });
     it("skillRulesKey builds rules key", () => {
-        assert.strictEqual(skillRulesKey("extractTopics"), "skills/extractTopics/rules");
-        assert.strictEqual(skillRulesKey("ai.judge.v1"), "skills/ai.judge.v1/rules");
-    });
-    it("skillInstructionsFileKey builds file-based instructions key", () => {
-        assert.strictEqual(skillInstructionsFileKey("extractTopics"), "skills/extractTopics-instructions.md");
-        assert.strictEqual(skillInstructionsFileKey("mySkill"), "skills/mySkill-instructions.md");
-    });
-    it("skillRulesFileKey builds file-based rules key", () => {
-        assert.strictEqual(skillRulesFileKey("extractTopics"), "skills/extractTopics-rules.json");
-        assert.strictEqual(skillRulesFileKey("mySkill"), "skills/mySkill-rules.json");
+        assert.strictEqual(skillRulesKey("extractTopics"), "functions/extractTopics/rules");
+        assert.strictEqual(skillRulesKey("ai.judge.v1"), "functions/ai.judge.v1/rules");
     });
 });
 
@@ -130,7 +120,7 @@ describe("getSkillInstructions / setSkillInstructions (folder-based)", () => {
         const text = await getSkillInstructions(mockResolver, "missing");
         assert.strictEqual(text, "");
     });
-    it("setSkillInstructions calls resolver.set with folder key (skills/<id>/strong)", async () => {
+    it("setSkillInstructions calls resolver.set with folder key (functions/<id>/strong)", async () => {
         let setKey: string | null = null;
         let setContent: string | null = null;
         const mockResolver = {
@@ -140,7 +130,7 @@ describe("getSkillInstructions / setSkillInstructions (folder-based)", () => {
             },
         } as Parameters<typeof setSkillInstructions>[0];
         await setSkillInstructions(mockResolver, "mySkill", "New instructions.");
-        assert.strictEqual(setKey, "skills/mySkill/strong");
+        assert.strictEqual(setKey, "functions/mySkill/strong");
         assert.strictEqual(setContent, "New instructions.");
     });
 });
@@ -161,7 +151,7 @@ describe("getSkillRules / setSkillRules (folder-based)", () => {
         const mockResolver = { get: async () => { throw new Error("missing"); } } as Parameters<typeof getSkillRules>[0];
         assert.strictEqual((await getSkillRules(mockResolver, "missing")).length, 0);
     });
-    it("setSkillRules calls resolver.set with folder key (skills/<id>/rules)", async () => {
+    it("setSkillRules calls resolver.set with folder key (functions/<id>/rules)", async () => {
         let setKey: string | null = null;
         let setContent: string | null = null;
         const mockResolver = {
@@ -171,34 +161,34 @@ describe("getSkillRules / setSkillRules (folder-based)", () => {
             },
         } as Parameters<typeof setSkillRules>[0];
         await setSkillRules(mockResolver, "mySkill", [{ rule: "One rule.", weight: 1 }]);
-        assert.strictEqual(setKey, "skills/mySkill/rules");
+        assert.strictEqual(setKey, "functions/mySkill/rules");
         assert.ok(setContent?.includes("One rule."));
         assert.ok(JSON.parse(setContent!).length === 1);
     });
 });
 
 describe("getSkillNamesFromContent", () => {
-    it("ignores root-level file keys (only folder-based keys are canonical)", async () => {
+    it("returns names from folder-based keys only (functions/<id>/...)", async () => {
         const mockResolver = {
             listKeys: async () => [
-                "skills/foo-instructions.md",
-                "skills/foo-rules.json",
-                "skills/bar-instructions.md",
+                "functions/foo/strong",
+                "functions/foo/rules",
+                "functions/bar/strong",
             ],
         } as Parameters<typeof getSkillNamesFromContent>[0];
         const names = await getSkillNamesFromContent(mockResolver);
-        assert.deepStrictEqual(names, []);
+        assert.deepStrictEqual(names.sort(), ["bar", "foo"]);
     });
-    it("derives names from folder-based keys (skills/<id>/weak, strong, rules)", async () => {
+    it("derives names from folder-based keys (functions/<id>/weak, strong, rules)", async () => {
         const mockResolver = {
-            listKeys: async () => ["skills/extractTopics/weak", "skills/extractTopics/strong", "skills/matchLists/weak"],
+            listKeys: async () => ["functions/extractTopics/weak", "functions/extractTopics/strong", "functions/matchLists/weak"],
         } as Parameters<typeof getSkillNamesFromContent>[0];
         const names = await getSkillNamesFromContent(mockResolver);
         assert.deepStrictEqual(names.sort(), ["extractTopics", "matchLists"]);
     });
     it("returns unique names when a skill has multiple keys", async () => {
         const mockResolver = {
-            listKeys: async () => ["skills/foo/weak", "skills/foo/strong", "skills/foo/rules"],
+            listKeys: async () => ["functions/foo/weak", "functions/foo/strong", "functions/foo/rules"],
         } as Parameters<typeof getSkillNamesFromContent>[0];
         const names = await getSkillNamesFromContent(mockResolver);
         assert.deepStrictEqual(names, ["foo"]);
@@ -252,7 +242,7 @@ describe("version APIs (require nx-content getVersions, getAtRef, setActiveVersi
         } as Parameters<typeof setSkillInstructionsActiveVersion>[0];
         const result = await setSkillInstructionsActiveVersion(resolver, "mySkill", "abc123", { commit: true });
         assert.strictEqual(result.updated, true);
-        assert.strictEqual(calledKey, "skills/mySkill/strong");
+        assert.strictEqual(calledKey, "functions/mySkill/strong");
         assert.strictEqual(calledRef, "abc123");
     });
     it("setSkillRulesActiveVersion calls resolver.setActiveVersion", async () => {
@@ -265,7 +255,7 @@ describe("version APIs (require nx-content getVersions, getAtRef, setActiveVersi
             },
         } as Parameters<typeof setSkillRulesActiveVersion>[0];
         await setSkillRulesActiveVersion(resolver, "mySkill", "v1");
-        assert.strictEqual(calledKey, "skills/mySkill/rules");
+        assert.strictEqual(calledKey, "functions/mySkill/rules");
     });
     it("version APIs throw when resolver lacks getVersions/getAtRef/setActiveVersion", async () => {
         const resolverNoVersions = { get: async () => "", set: async () => {}, listKeys: async () => [] } as Parameters<typeof getSkillInstructionVersions>[0];

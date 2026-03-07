@@ -7,7 +7,7 @@ describe("buildFullLibrarySnapshot", () => {
     const aggregate = {
       schemaVersion: "1.0",
       generatedAt: "2026-03-06T00:00:00.000Z",
-      skills: [{ $refKey: "skills/index/v1/demo.json" }],
+      skills: [{ $refKey: "functions/index/v1/demo.json" }],
     };
     const entry = {
       schemaVersion: "1.0",
@@ -15,8 +15,8 @@ describe("buildFullLibrarySnapshot", () => {
       displayName: "Demo",
       description: "Demo skill",
       source: {
-        contentPrefix: "skills/",
-        files: [{ key: "skills/demo/normal.md", kind: "instructions" }],
+        contentPrefix: "functions/",
+        files: [{ key: "functions/demo/normal.md", kind: "instructions" }],
         contentHash: "sha256:abc",
       },
       runtime: { callName: "demo" },
@@ -28,9 +28,9 @@ describe("buildFullLibrarySnapshot", () => {
     };
     const resolver = {
       get: async (key: string) => {
-        if (key === "skills/index.v1.json") return JSON.stringify(aggregate);
-        if (key === "skills/index/v1/demo.json") return JSON.stringify(entry);
-        if (key === "skills/demo/normal.md") return "Demo instructions content";
+        if (key === "functions/index.v1.json") return JSON.stringify(aggregate);
+        if (key === "functions/index/v1/demo.json") return JSON.stringify(entry);
+        if (key === "functions/demo/normal.md") return "Demo instructions content";
         throw new Error("not found");
       },
       listKeys: async () => [],
@@ -48,7 +48,7 @@ describe("buildFullLibrarySnapshot", () => {
     const aggregate = {
       schemaVersion: "1.0",
       generatedAt: "2026-03-06T00:00:00.000Z",
-      skills: [{ $refKey: "skills/index/v1/classify.json" }],
+      skills: [{ $refKey: "functions/index/v1/classify.json" }],
     };
     const entry = {
       schemaVersion: "1.0",
@@ -65,8 +65,8 @@ describe("buildFullLibrarySnapshot", () => {
     };
     const resolver = {
       get: async (key: string) => {
-        if (key === "skills/index.v1.json") return JSON.stringify(aggregate);
-        if (key === "skills/index/v1/classify.json") return JSON.stringify(entry);
+        if (key === "functions/index.v1.json") return JSON.stringify(aggregate);
+        if (key === "functions/index/v1/classify.json") return JSON.stringify(entry);
         throw new Error("not found");
       },
       listKeys: async () => [],

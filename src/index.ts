@@ -51,8 +51,6 @@ export {
   resolveSkillRules,
   skillInstructionsKeyForMode,
   skillRulesKey,
-  skillInstructionsFileKey,
-  skillRulesFileKey,
   getSkillTestCases,
   setSkillTestCases,
   getFunctionMeta,
@@ -60,6 +58,11 @@ export {
   skillTestCasesKey,
   functionMetaKey,
 } from "./content/skillsResolver.js";
+export {
+  generateExamplesForFunction,
+  parseGenerateExamplesResponse,
+} from "./content/generateExamples.js";
+export type { GeneratedExample } from "./content/generateExamples.js";
 export type {
   SkillsResolverOptions,
   SkillMode,
@@ -141,6 +144,22 @@ export type {
   FullLibrarySkillEntry,
   FullLibrarySnapshot,
 } from "./content/fullLibrarySnapshot.js";
+export {
+  dedupeFunctionIds,
+  normalizeFunctionId,
+  runAllFunctionsCoverage,
+} from "./content/coverageOrchestrator.js";
+export type {
+  CoverageDeps,
+  CoverageOptions,
+  CoverageReport,
+  CoverageRule,
+  CoverageTestCase,
+  CoverageResultStatus,
+  FunctionCoverageStatus,
+} from "./content/coverageOrchestrator.js";
+export { parseUpdateLibraryIndexCliArgs } from "./content/updateLibraryIndexCli.js";
+export type { UpdateLibraryIndexCliArgs } from "./content/updateLibraryIndexCli.js";
 
 export function createClient(config: CreateClientOptions): Client {
   switch (config.backend) {

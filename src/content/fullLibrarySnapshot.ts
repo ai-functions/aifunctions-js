@@ -39,7 +39,7 @@ export type BuildFullLibrarySnapshotOptions = {
   indexKey?: string;
 };
 
-const DEFAULT_INDEX_KEY = "skills/index.v1.json";
+const DEFAULT_INDEX_KEY = "functions/index.v1.json";
 export const DEFAULT_FULL_LIBRARY_DOCS_PATH = ".docs/library-index.full.fallback.json";
 
 async function readTextSafe(resolver: ContentResolver, key: string): Promise<string> {

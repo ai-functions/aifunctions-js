@@ -1,6 +1,6 @@
 /**
  * Race profiles and history per function/skill.
- * Stores defaults + profiles in skills/<id>/race-config.json and race history in skills/<id>/races.json.
+ * Stores defaults + profiles in functions/<id>/race-config.json and race history in functions/<id>/races.json.
  */
 import type { ContentResolver } from "nx-content";
 import { normalizeKeySegment } from "nx-content";
@@ -49,12 +49,12 @@ const MAX_RACES = 200;
 
 function raceConfigKey(skillName: string): string {
   const segment = normalizeKeySegment(skillName);
-  return `skills/${segment}/race-config.json`;
+  return `functions/${segment}/race-config.json`;
 }
 
 function racesKey(skillName: string): string {
   const segment = normalizeKeySegment(skillName);
-  return `skills/${segment}/races.json`;
+  return `functions/${segment}/races.json`;
 }
 
 export async function getRaceConfig(

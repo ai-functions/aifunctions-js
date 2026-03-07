@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
-const src = path.join(root, ".content", "skills", "index.v1.json");
+const src = path.join(root, ".content", "functions", "index.v1.json");
 const destDir = path.join(root, ".docs");
 const dest = path.join(destDir, "library-index.fallback.json");
 

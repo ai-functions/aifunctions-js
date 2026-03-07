@@ -2,7 +2,7 @@
  * validateFunction — run schema + semantic quality checks for a content-based function.
  * Schema check: validates stored index examples against io.output (runFixtures).
  * Semantic check: runs stored test cases through the function, judges each output, aggregates score.
- * Writes lastValidation into skills/<id>/meta.json.
+ * Writes lastValidation into functions/<id>/meta.json.
  */
 import type { ContentResolver } from "nx-content";
 import { runFixtures } from "./runFixtures.js";
@@ -42,7 +42,7 @@ export type ValidateFunctionOptions = {
 /**
  * Run schema + semantic validation for a content-based function.
  * Returns { schemaValid, scoreNormalized, passed, threshold, cases }.
- * Also persists lastValidation into skills/<id>/meta.json.
+ * Also persists lastValidation into functions/<id>/meta.json.
  */
 export async function validateFunction(
   resolver: ContentResolver,

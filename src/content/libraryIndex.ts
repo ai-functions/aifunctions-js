@@ -10,12 +10,12 @@ import type { Client } from "../core/types.js";
 import { getBuiltInAbilityManifest } from "../../functions/builtinManifest.js";
 import type { BuiltInAbilityEntry } from "../../functions/builtinManifest.js";
 
-const DEFAULT_INDEX_KEY = "skills/index.v1.json";
+const DEFAULT_INDEX_KEY = "functions/index.v1.json";
 /** Path relative to process.cwd() for fallback when content has no index. */
 export const LIBRARY_INDEX_FALLBACK_REL = ".docs/library-index.fallback.json";
-const INDEX_PREFIX = "skills/index/v1/";
-const META_KEY = "skills/index/v1/_meta.json";
-const CONTENT_PREFIX = "skills/";
+const INDEX_PREFIX = "functions/index/v1/";
+const META_KEY = "functions/index/v1/_meta.json";
+const CONTENT_PREFIX = "functions/";
 
 export type SourceFileKind = "instructions" | "rules" | "prompt" | "other";
 
@@ -135,11 +135,11 @@ export type UpdateLibraryIndexReport = {
 
 export type ValidationResult = { valid: boolean; errors?: string[] };
 
-/** Canonical: only folder-based keys skills/<skillId>/<file>. */
+/** Canonical: only folder-based keys functions/<functionId>/<file>. */
 function skillNameFromKey(key: string): string | null {
   const normalized = key.replace(/\\/g, "/").trim();
-  if (!normalized.startsWith("skills/")) return null;
-  const parts = normalized.slice("skills/".length).split("/").filter(Boolean);
+  if (!normalized.startsWith(CONTENT_PREFIX)) return null;
+  const parts = normalized.slice(CONTENT_PREFIX.length).split("/").filter(Boolean);
   if (parts.length < 2) return null;
   return parts[0] || null;
 }
@@ -403,7 +403,7 @@ export async function updateLibraryIndex(
 ): Promise<UpdateLibraryIndexReport> {
   const {
     resolver,
-    prefix = "skills/",
+    prefix = CONTENT_PREFIX,
     indexKey = DEFAULT_INDEX_KEY,
     mode = "normal",
     model,

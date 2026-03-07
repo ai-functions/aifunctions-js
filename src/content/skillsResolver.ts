@@ -61,10 +61,13 @@ export function getSkillsResolver(
   return new ContentResolver(config);
 }
 
+/** Canonical content prefix: one folder per function. No backward compatibility to skills/ or flat files. */
+export const CONTENT_PREFIX = "functions/";
+
 /** LlmMode for skill instruction variant. Canonical files: weak, strong, ultra. API "normal" maps to strong. */
 export type SkillMode = "weak" | "normal" | "strong" | "ultra";
 
-/** Canonical instruction file names under skills/<id>/ (no "normal" file; normal → strong). */
+/** Canonical instruction file names under functions/<id>/ (no "normal" file; normal → strong). */
 const MODE_TO_FILE: Record<SkillMode, string> = {
   weak: "weak",
   normal: "strong",
@@ -74,43 +77,27 @@ const MODE_TO_FILE: Record<SkillMode, string> = {
 
 /**
  * Content key for mode-specific skill instructions.
- * Canonical: skills/<skillId>/weak, strong, ultra. API mode "normal" reads/writes strong.
+ * Canonical: functions/<functionId>/weak, strong, ultra. API mode "normal" reads/writes strong.
  */
 export function skillInstructionsKeyForMode(
   skillKey: string,
   mode: SkillMode
 ): string {
   const segment = normalizeKeySegment(skillKey);
-  return `skills/${segment}/${MODE_TO_FILE[mode]}`;
+  return `${CONTENT_PREFIX}${segment}/${MODE_TO_FILE[mode]}`;
 }
 
 /**
- * Content key for skill rules. Convention: skills/<skillId>/rules (inside skill folder).
+ * Content key for skill rules. Convention: functions/<functionId>/rules (inside function folder).
  */
 export function skillRulesKey(skillKey: string): string {
   const segment = normalizeKeySegment(skillKey);
-  return `skills/${segment}/rules`;
-}
-
-/**
- * @deprecated Use folder-based keys only: skills/<skillId>/weak, strong, ultra. Prefer getSkillInstructions(resolver, name) which reads from strong.
- */
-export function skillInstructionsFileKey(skillName: string): string {
-  const segment = normalizeKeySegment(skillName);
-  return `skills/${segment}-instructions.md`;
-}
-
-/**
- * @deprecated Use folder-based key only: skills/<skillId>/rules. Prefer getSkillRules(resolver, name).
- */
-export function skillRulesFileKey(skillName: string): string {
-  const segment = normalizeKeySegment(skillName);
-  return `skills/${segment}-rules.json`;
+  return `${CONTENT_PREFIX}${segment}/rules`;
 }
 
 /**
  * Resolve skill instructions for the given skill key and mode from the content resolver.
- * Uses key skills/<skillKey>/<mode>. Returns the raw instruction text (SYSTEM).
+ * Uses key functions/<skillKey>/<mode>. Returns the raw instruction text (SYSTEM).
  */
 export async function resolveSkillInstructions(
   resolver: ContentResolver,
@@ -138,24 +125,34 @@ function parseRulesRaw(raw: string): SkillRule[] {
 }
 
 /**
- * Get skill instructions from the canonical folder key (skills/<id>/strong).
+ * Get skill instructions from the canonical folder key (functions/<id>/strong).
  * Returns empty string if key not found.
  */
 export async function getSkillInstructions(
   resolver: ContentResolver,
   skillName: string
 ): Promise<string> {
-  const key = skillInstructionsKeyForMode(skillName, "strong");
-  try {
-    const raw = await resolver.get(key);
-    return typeof raw === "string" ? raw : "";
-  } catch {
-    return "";
+  const segment = normalizeKeySegment(skillName);
+  // Try keys in priority order. Content may be stored as "normal" on disk even
+  // though the canonical target is "strong" (MODE_TO_FILE maps both → "strong").
+  const candidates = [
+    `${CONTENT_PREFIX}${segment}/strong`,
+    `${CONTENT_PREFIX}${segment}/normal`,
+    `${CONTENT_PREFIX}${segment}/ultra`,
+  ];
+  for (const key of candidates) {
+    try {
+      const raw = await resolver.get(key);
+      if (typeof raw === "string" && raw.trim()) return raw;
+    } catch {
+      // not found — try next
+    }
   }
+  return "";
 }
 
 /**
- * Update skill instructions at the canonical folder key (skills/<id>/strong).
+ * Update skill instructions at the canonical folder key (functions/<id>/strong).
  * Use resolver.pushToRemote() after to persist to git.
  */
 export async function setSkillInstructions(
@@ -168,7 +165,7 @@ export async function setSkillInstructions(
 }
 
 /**
- * Get skill rules from the canonical folder key (skills/<id>/rules).
+ * Get skill rules from the canonical folder key (functions/<id>/rules).
  * Returns empty array if not found or parse fails.
  */
 export async function getSkillRules(
@@ -185,7 +182,7 @@ export async function getSkillRules(
 }
 
 /**
- * Update skill rules at the canonical folder key (skills/<id>/rules).
+ * Update skill rules at the canonical folder key (functions/<id>/rules).
  * Use resolver.pushToRemote() after to persist to git.
  */
 export async function setSkillRules(
@@ -198,25 +195,25 @@ export async function setSkillRules(
 }
 
 /**
- * Derive skill name from a key under "skills/".
- * Canonical: only folder-based keys skills/<skillId>/<file> (e.g. skills/classify/weak, skills/classify/rules).
+ * Derive skill name from a key under CONTENT_PREFIX (functions/).
+ * Canonical: only folder-based keys functions/<functionId>/<file>.
  */
 function skillNameFromKey(key: string): string | null {
   const normalized = key.replace(/\\/g, "/").trim();
-  if (!normalized.startsWith("skills/")) return null;
-  const parts = normalized.slice("skills/".length).split("/").filter(Boolean);
+  if (!normalized.startsWith(CONTENT_PREFIX)) return null;
+  const parts = normalized.slice(CONTENT_PREFIX.length).split("/").filter(Boolean);
   if (parts.length < 2) return null;
   return parts[0] || null;
 }
 
 /**
- * Discover skill names from the content resolver by listing keys under "skills/".
- * Only folder-based keys (skills/<skillId>/...) are considered; root-level *-instructions.md / *-rules.json are not allowed.
+ * Discover skill names from the content resolver by listing keys under CONTENT_PREFIX.
+ * Only folder-based keys (functions/<functionId>/...) are considered.
  */
 export async function getSkillNamesFromContent(
   resolver: ContentResolver
 ): Promise<string[]> {
-  const keys = await resolver.listKeys("skills/");
+  const keys = await resolver.listKeys(CONTENT_PREFIX);
   const names = new Set<string>();
   for (const key of keys) {
     const name = skillNameFromKey(key);
@@ -227,7 +224,7 @@ export async function getSkillNamesFromContent(
 
 /**
  * Resolve skill rules for the given skill key from the content resolver.
- * Uses key skills/<skillKey>/rules. Expects JSON array of { rule: string; weight: number }.
+ * Uses key functions/<skillKey>/rules. Expects JSON array of { rule: string; weight: number }.
  * Returns parsed rules or empty array if key not found or parse fails.
  */
 export async function resolveSkillRules(
@@ -263,7 +260,7 @@ export type SkillTestCase = {
 
 export function skillTestCasesKey(skillName: string): string {
   const segment = normalizeKeySegment(skillName);
-  return `skills/${segment}/test-cases.json`;
+  return `${CONTENT_PREFIX}${segment}/test-cases.json`;
 }
 
 export async function getSkillTestCases(
@@ -310,7 +307,7 @@ export type FunctionMeta = {
 
 export function functionMetaKey(skillName: string): string {
   const segment = normalizeKeySegment(skillName);
-  return `skills/${segment}/meta.json`;
+  return `${CONTENT_PREFIX}${segment}/meta.json`;
 }
 
 const DEFAULT_META: FunctionMeta = {
@@ -371,7 +368,7 @@ function requireVersions(resolver: ContentResolver): asserts resolver is Resolve
 }
 
 /**
- * List version history for the skill's instructions (skills/<id>/strong).
+ * List version history for the skill's instructions (functions/<id>/strong).
  * Requires nx-content resolver with getVersions(key).
  */
 export async function getSkillInstructionVersions(
@@ -384,7 +381,7 @@ export async function getSkillInstructionVersions(
 }
 
 /**
- * List version history for the skill's rules (skills/<id>/rules).
+ * List version history for the skill's rules (functions/<id>/rules).
  */
 export async function getSkillRulesVersions(
   resolver: ContentResolver,
@@ -396,7 +393,7 @@ export async function getSkillRulesVersions(
 }
 
 /**
- * Get skill instructions content at a git ref (skills/<id>/strong).
+ * Get skill instructions content at a git ref (functions/<id>/strong).
  * Requires nx-content getAtRef(key, ref).
  */
 export async function getSkillInstructionsAtRef(
@@ -410,7 +407,7 @@ export async function getSkillInstructionsAtRef(
 }
 
 /**
- * Get skill rules at a git ref (skills/<id>/rules). Returns parsed rules or empty array if not found/invalid.
+ * Get skill rules at a git ref (functions/<id>/rules). Returns parsed rules or empty array if not found/invalid.
  */
 export async function getSkillRulesAtRef(
   resolver: ContentResolver,
@@ -433,7 +430,7 @@ export type SetActiveVersionOptions = {
 };
 
 /**
- * Set the active (current) instructions (skills/<id>/strong) to the content at the given ref.
+ * Set the active (current) instructions (functions/<id>/strong) to the content at the given ref.
  * Uses nx-content setActiveVersion(key, ref, options). Call pushToRemote() after to publish.
  */
 export async function setSkillInstructionsActiveVersion(
@@ -448,7 +445,7 @@ export async function setSkillInstructionsActiveVersion(
 }
 
 /**
- * Set the active (current) rules (skills/<id>/rules) to the content at the given ref.
+ * Set the active (current) rules (functions/<id>/rules) to the content at the given ref.
  */
 export async function setSkillRulesActiveVersion(
   resolver: ContentResolver,

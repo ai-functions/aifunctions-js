@@ -1,79 +1,79 @@
 {
   "schemaVersion": "1.0",
-  "generatedAt": "2026-03-06T22:18:57.380Z",
+  "generatedAt": "2026-03-07T04:32:55.141Z",
   "generator": {
     "name": "light-skills-indexer",
     "mode": "normal"
   },
   "skills": [
     {
-      "$refKey": "skills/index/v1/classify.json"
+      "$refKey": "functions/index/v1/classify.json"
     },
     {
-      "$refKey": "skills/index/v1/cluster.json"
+      "$refKey": "functions/index/v1/cluster.json"
     },
     {
-      "$refKey": "skills/index/v1/extractEntities.json"
+      "$refKey": "functions/index/v1/extractEntities.json"
     },
     {
-      "$refKey": "skills/index/v1/extractTopics.json"
+      "$refKey": "functions/index/v1/extractTopics.json"
     },
     {
-      "$refKey": "skills/index/v1/matchLists.json"
+      "$refKey": "functions/index/v1/matchLists.json"
     },
     {
-      "$refKey": "skills/index/v1/rank.json"
+      "$refKey": "functions/index/v1/rank.json"
     },
     {
-      "$refKey": "skills/index/v1/sentiment.json"
+      "$refKey": "functions/index/v1/sentiment.json"
     },
     {
-      "$refKey": "skills/index/v1/summarize.json"
+      "$refKey": "functions/index/v1/summarize.json"
     },
     {
-      "$refKey": "skills/index/v1/translate.json"
+      "$refKey": "functions/index/v1/translate.json"
     },
     {
-      "$refKey": "skills/index/v1/ai.ask.json"
+      "$refKey": "functions/index/v1/ai.ask.json"
     },
     {
-      "$refKey": "skills/index/v1/judge.json"
+      "$refKey": "functions/index/v1/judge.json"
     },
     {
-      "$refKey": "skills/index/v1/compare.json"
+      "$refKey": "functions/index/v1/compare.json"
     },
     {
-      "$refKey": "skills/index/v1/generateInstructions.json"
+      "$refKey": "functions/index/v1/generateInstructions.json"
     },
     {
-      "$refKey": "skills/index/v1/optimizeInstructions.json"
+      "$refKey": "functions/index/v1/optimizeInstructions.json"
     },
     {
-      "$refKey": "skills/index/v1/fixInstructions.json"
+      "$refKey": "functions/index/v1/fixInstructions.json"
     },
     {
-      "$refKey": "skills/index/v1/generateRule.json"
+      "$refKey": "functions/index/v1/generateRule.json"
     },
     {
-      "$refKey": "skills/index/v1/generateJudgeRules.json"
+      "$refKey": "functions/index/v1/generateJudgeRules.json"
     },
     {
-      "$refKey": "skills/index/v1/raceModels.json"
+      "$refKey": "functions/index/v1/raceModels.json"
     },
     {
-      "$refKey": "skills/index/v1/collectionMapping.json"
+      "$refKey": "functions/index/v1/collectionMapping.json"
     },
     {
-      "$refKey": "skills/index/v1/validateFieldRelationship.json"
+      "$refKey": "functions/index/v1/validateFieldRelationship.json"
     },
     {
-      "$refKey": "skills/index/v1/suggestFieldRelationship.json"
+      "$refKey": "functions/index/v1/suggestFieldRelationship.json"
     },
     {
-      "$refKey": "skills/index/v1/ai.normalize-judge-rules.v1.json"
+      "$refKey": "functions/index/v1/ai.normalize-judge-rules.v1.json"
     },
     {
-      "$refKey": "skills/index/v1/ai.aggregate-judge-feedback.v1.json"
+      "$refKey": "functions/index/v1/ai.aggregate-judge-feedback.v1.json"
     }
   ]
 }

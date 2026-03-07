@@ -9,7 +9,7 @@
  * Options:
  *   --skill=ID   Run only this skill's fixtures (default: all skills with examples).
  *
- * Prerequisites: .content with skills/ and a built library index (skills/index.v1.json).
+ * Prerequisites: .content with functions/ and a built library index (functions/index.v1.json).
  * Run after build if you use dist: npm run build && npx tsx scripts/runFixtures.ts
  */
 import { getSkillsResolver } from "../src/index.js";

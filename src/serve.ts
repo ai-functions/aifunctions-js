@@ -56,6 +56,7 @@ import {
 import { runFixtures } from "./content/runFixtures.js";
 import { runLayoutLint } from "./content/lintContentLayout.js";
 import { validateFunction } from "./content/validateFunction.js";
+import { generateExamplesForFunction } from "./content/generateExamples.js";
 import { requireAuth } from "./serve/auth.js";
 import { wrapWithUsageTracking, toUsageResponse } from "./serve/usageTracker.js";
 import { extractAttribution } from "./serve/attribution.js";
@@ -1176,16 +1177,6 @@ async function handleGetFunction(res: import("node:http").ServerResponse, name: 
   }
 }
 
-/** Extract JSON array from model response; handles optional markdown code fence. */
-function parseGenerateExamplesResponse(text: string): Array<{ input?: unknown; goodOutput?: unknown; goodRationale?: string; badOutput?: unknown; badRationale?: string }> {
-  let raw = text.trim();
-  const codeMatch = raw.match(/^```(?:json)?\s*([\s\S]*?)```$/m);
-  if (codeMatch) raw = codeMatch[1]!.trim();
-  const parsed = JSON.parse(raw) as unknown;
-  if (!Array.isArray(parsed)) return [];
-  return parsed.filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null);
-}
-
 async function handleGenerateExamples(
   res: import("node:http").ServerResponse,
   body: unknown,
@@ -1198,35 +1189,25 @@ async function handleGenerateExamples(
   }
   const count = Math.min(10, Math.max(1, Number(b?.count) || 5));
   const mode = b?.mode ?? "strong";
-  const prompt = `You are helping create training examples for an AI function. Given this description, generate exactly ${count} diverse examples. Each example must have:
-- input: an object (e.g. { "text": "..." } or similar) representing one input case
-- goodOutput: the correct/ideal output for that input
-- goodRationale: one sentence why this output is correct
-- badOutput: an incorrect or suboptimal output for the same input
-- badRationale: one sentence why this output is wrong or worse
-
-Description: ${b.description.trim()}
-
-Return a JSON array of ${count} objects, each with keys: input, goodOutput, goodRationale, badOutput, badRationale. No other commentary.`;
+  const preset = getModePreset(mode);
+  const overrides = getModelOverrides();
+  const modeForModel = mode === "weak" || mode === "normal" ? "normal" : "strong";
+  const model = overrides[modeForModel] ?? preset.model;
+  if (!model || preset.backend === "llama-cpp") {
+    sendError(res, 422, "generate-examples requires OpenRouter (set mode to normal/strong/ultra or set LLM_MODEL_STRONG)", "UNSUPPORTED_MODE");
+    return;
+  }
   const attribution = extractAttribution(body, "generate-examples");
   const tracker = makeTrackedClient(req, attribution);
   try {
-    const preset = getModePreset(mode);
-    const overrides = getModelOverrides();
-    const modeForModel = mode === "weak" || mode === "normal" ? "normal" : "strong";
-    const model = overrides[modeForModel] ?? preset.model;
-    if (!model || preset.backend === "llama-cpp") {
-      sendError(res, 422, "generate-examples requires OpenRouter (set mode to normal/strong/ultra or set LLM_MODEL_STRONG)", "UNSUPPORTED_MODE");
-      return;
-    }
-    const result = await concurrencyGuard(() =>
-      tracker.client.ask(prompt, {
-        model,
-        temperature: 0.3,
-        maxTokens: 4096,
+    const examples = await concurrencyGuard(() =>
+      generateExamplesForFunction({
+        instructions: b.description!.trim(),
+        functionId: "generate-examples",
+        count,
+        client: tracker.client,
       })
     );
-    const examples = parseGenerateExamplesResponse(result.text);
     const usage = toUsageResponse(tracker.getUsage());
     sendOk(res, { examples, usage });
   } catch (e) {
@@ -1479,7 +1460,7 @@ async function handleContentSync(res: import("node:http").ServerResponse, body: 
   }
   try {
     const resolver = getSkillsResolver();
-    const report = await updateLibraryIndex({ resolver, prefix: "skills/", dryRun: b.dryRun ?? false });
+    const report = await updateLibraryIndex({ resolver, prefix: "functions/", dryRun: b.dryRun ?? false });
     const st = report.stats;
     sendOk(res, { synced: (st?.skillsUpdated ?? 0) + (st?.skillsUnchanged ?? 0), created: 0, updated: st?.skillsUpdated ?? 0, unchanged: st?.skillsUnchanged ?? 0, errors: report.errors?.map((e: { reason?: string }) => e.reason ?? String(e)) ?? [] });
   } catch (e) {
@@ -1491,7 +1472,7 @@ async function handleContentIndex(res: import("node:http").ServerResponse, body:
   const b = (body as { prefix?: string }) ?? {};
   const resolver = getSkillsResolver();
   try {
-    const report = await updateLibraryIndex({ resolver, prefix: b.prefix ?? "skills/", dryRun: false });
+    const report = await updateLibraryIndex({ resolver, prefix: b.prefix ?? "functions/", dryRun: false });
     const skills: string[] = (report.refKeys ?? []).map((key: string) => { const m = key.match(/[^/]+\.json$/); return m ? m[0].replace(".json", "") : key; });
     sendOk(res, { indexed: report.stats?.skillsTotal ?? 0, skills, errors: report.errors?.map((e: { reason?: string }) => e.reason ?? String(e)) ?? [] });
   } catch (e) {
@@ -1511,7 +1492,7 @@ async function handleContentIndexFull(res: import("node:http").ServerResponse, b
   try {
     const report = await updateLibraryIndex({
       resolver,
-      prefix: b.prefix ?? "skills/",
+      prefix: b.prefix ?? "functions/",
       mode: b.mode ?? "normal",
       model: b.model,
       dryRun: false,
@@ -1563,7 +1544,7 @@ async function handleContentLayoutLint(res: import("node:http").ServerResponse):
   const resolver = getSkillsResolver();
   try {
     const report = await runLayoutLint(resolver);
-    const issues = report.errors.map((issue) => ({ path: "skills/", issue, severity: "error" as const }));
+    const issues = report.errors.map((issue) => ({ path: "functions/", issue, severity: "error" as const }));
     sendOk(res, { valid: report.ok, issues });
   } catch (e) {
     sendError(res, 500, e instanceof Error ? e.message : String(e), "MISSING_OPTIONAL_DEP");

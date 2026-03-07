@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   });
 
   if (!resolver.getContentRoot()) {
-    console.log("Content root not available. Ensure .content exists with a skills/ subtree.");
+    console.log("Content root not available. Ensure .content exists with a functions/ subtree.");
     process.exit(0);
   }
 

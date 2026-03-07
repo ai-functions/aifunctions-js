@@ -19,7 +19,7 @@ import {
 const validAggregate: AggregateIndex = {
   schemaVersion: "1.0",
   generatedAt: "2026-03-04T12:00:00Z",
-  skills: [{ $refKey: "skills/index/v1/extractTopics.json" }],
+  skills: [{ $refKey: "functions/index/v1/extractTopics.json" }],
 };
 
 const validSkillEntry: SkillIndexEntry = {
@@ -28,10 +28,10 @@ const validSkillEntry: SkillIndexEntry = {
   displayName: "Extract Topics",
   description: "Extracts key topics from input text.",
   source: {
-    contentPrefix: "skills/",
+    contentPrefix: "functions/",
     files: [
-      { key: "skills/extractTopics-instructions.md", kind: "instructions" },
-      { key: "skills/extractTopics-rules.json", kind: "rules" },
+      { key: "functions/extractTopics/strong", kind: "instructions" },
+      { key: "functions/extractTopics/rules", kind: "rules" },
     ],
     contentHash: "sha256:abc123",
   },
@@ -116,7 +116,7 @@ describe("getLibraryIndex", () => {
     const index = await getLibraryIndex({ resolver });
     assert.strictEqual(index.schemaVersion, "1.0");
     assert.strictEqual(index.skills.length, 1);
-    assert.strictEqual(index.skills[0].$refKey, "skills/index/v1/extractTopics.json");
+    assert.strictEqual(index.skills[0].$refKey, "functions/index/v1/extractTopics.json");
   });
   it("returns empty aggregate when allowMissing and key missing and no fallback", async () => {
     const resolver = {
@@ -200,11 +200,11 @@ describe("updateLibraryIndex includes built-ins and quality method", () => {
       staticOnly: true,
     });
     assert.ok(report.refKeys.length >= 23);
-    const aggregateRaw = store.get("skills/index.v1.json");
+    const aggregateRaw = store.get("functions/index.v1.json");
     assert.ok(aggregateRaw);
     const aggregate = JSON.parse(aggregateRaw!) as AggregateIndex;
     assert.ok(aggregate.skills.some((s) => s.$refKey.endsWith("/classify.json")));
-    const classifyRaw = store.get("skills/index/v1/classify.json");
+    const classifyRaw = store.get("functions/index/v1/classify.json");
     assert.ok(classifyRaw);
     const classifyEntry = JSON.parse(classifyRaw!) as SkillIndexEntry;
     assert.deepStrictEqual(classifyEntry.source, { kind: "built-in" });
@@ -214,7 +214,7 @@ describe("updateLibraryIndex includes built-ins and quality method", () => {
 
   it("static content entries do not use hardcoded 0.4 confidence", async () => {
     const store = new Map<string, string>();
-    store.set("skills/demo/normal.md", "Demo instructions");
+    store.set("functions/demo/normal.md", "Demo instructions");
     const resolver = {
       get: async (key: string) => {
         if (!store.has(key)) throw new Error("ENOENT");
@@ -223,7 +223,7 @@ describe("updateLibraryIndex includes built-ins and quality method", () => {
       set: async (key: string, value: string) => {
         store.set(key, value);
       },
-      listKeys: async () => ["skills/demo/normal.md"],
+      listKeys: async () => ["functions/demo/normal.md"],
     } as unknown as Parameters<typeof updateLibraryIndex>[0]["resolver"];
 
     await updateLibraryIndex({
@@ -231,7 +231,7 @@ describe("updateLibraryIndex includes built-ins and quality method", () => {
       includeBuiltIn: false,
       staticOnly: true,
     });
-    const demoRaw = store.get("skills/index/v1/demo.json");
+    const demoRaw = store.get("functions/index/v1/demo.json");
     assert.ok(demoRaw);
     const demoEntry = JSON.parse(demoRaw!) as SkillIndexEntry;
     assert.strictEqual(demoEntry.quality.method, "static");
@@ -279,7 +279,7 @@ describe("updateLibraryIndex includes built-ins and quality method", () => {
       client: mockClient as never,
     });
 
-    const entryRaw = store.get("skills/index/v1/extractTopics.json");
+    const entryRaw = store.get("functions/index/v1/extractTopics.json");
     assert.ok(entryRaw);
     const entry = JSON.parse(entryRaw!) as SkillIndexEntry;
     assert.strictEqual(entry.quality.method, "judged");

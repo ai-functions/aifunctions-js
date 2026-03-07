@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * CLI to regenerate the skills library index (skills/index.v1.json and per-skill files).
+ * CLI to regenerate the library index (functions/index.v1.json and per-function files).
  * Uses nx-content resolver and light-skills askJson for LLM indexing.
  *
  * Usage:
@@ -9,36 +9,26 @@
  * Options:
  *   --dry-run       Do not write; print report only.
  *   --static-only   Build index from content only (no LLM). Use for visibility when API is unavailable.
- *   --incremental   Skip skills whose content hash is unchanged.
+ *   --incremental   Skip functions whose content hash is unchanged.
  *   --force         Overwrite index even if result would be empty/partial.
- *   --prefix=PREFIX Content prefix to list (default: skills/).
+ *   --prefix=PREFIX Content prefix to list (default: functions/).
  *   --mode=MODE     LLM mode: weak | normal | strong (default: normal).
  *   --model=MODEL   Override model.
  *
- * Prerequisites: .content with skills/ subtree (or set localRoot). OPENROUTER_API_KEY for normal/strong (omit for --static-only).
+ * Prerequisites: .content with functions/ subtree (or set localRoot). OPENROUTER_API_KEY for normal/strong (omit for --static-only).
  */
 import { ContentResolver } from "nx-content";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { updateLibraryIndex } from "../src/content/libraryIndex.js";
+import { parseUpdateLibraryIndexCliArgs } from "../src/content/updateLibraryIndexCli.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 
-function parseArg(args: string[], name: string): string | undefined {
-  const eq = args.find((a) => a.startsWith(`--${name}=`));
-  return eq ? eq.split("=")[1]?.trim() : undefined;
-}
-
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const dryRun = args.includes("--dry-run");
-  const staticOnly = args.includes("--static-only");
-  const incremental = args.includes("--incremental");
-  const force = args.includes("--force");
-  const prefix = parseArg(args, "prefix") ?? "skills/";
-  const mode = (parseArg(args, "mode") ?? "normal") as "weak" | "normal" | "strong";
-  const model = parseArg(args, "model");
+  const parsed = parseUpdateLibraryIndexCliArgs(args);
 
   const contentDir = path.join(rootDir, ".content");
   const resolver = new ContentResolver({
@@ -47,22 +37,32 @@ async function main(): Promise<void> {
   });
 
   if (!resolver.getContentRoot()) {
-    console.error("Content root not available. Ensure .content exists with a skills/ subtree.");
+    console.error("Content root not available. Ensure .content exists with a functions/ subtree.");
     process.exit(1);
   }
 
   console.log("Updating library index...");
-  console.log("  prefix:", prefix, "| mode:", mode, "| dryRun:", dryRun, "| staticOnly:", staticOnly, "| incremental:", incremental);
+  console.log(
+    "  prefix:", parsed.prefix,
+    "| mode:", parsed.mode,
+    "| dryRun:", parsed.dryRun,
+    "| staticOnly:", parsed.staticOnly,
+    "| incremental:", parsed.incremental,
+    "| includeBuiltIn:", parsed.includeBuiltIn,
+    "| judgeAfterIndex:", parsed.judgeAfterIndex
+  );
 
   const report = await updateLibraryIndex({
     resolver,
-    prefix,
-    mode,
-    model,
-    dryRun,
-    incremental,
-    force,
-    staticOnly,
+    prefix: parsed.prefix,
+    mode: parsed.mode,
+    model: parsed.model,
+    dryRun: parsed.dryRun,
+    incremental: parsed.incremental,
+    force: parsed.force,
+    staticOnly: parsed.staticOnly,
+    includeBuiltIn: parsed.includeBuiltIn,
+    judgeAfterIndex: parsed.judgeAfterIndex,
   });
 
   console.log("\nReport:");
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
     report.errors.forEach((e) => console.log("   -", e.skillId, ":", e.reason));
   }
   console.log("  refKeys count:", report.refKeys.length);
-  if (dryRun) console.log("\n(dry-run: no files written)");
+  if (parsed.dryRun) console.log("\n(dry-run: no files written)");
 }
 
 main().catch((err) => {

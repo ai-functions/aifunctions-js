@@ -8,15 +8,15 @@ if [[ ! -d "$CONTENT/.git" ]]; then
   echo ".content is not a git repo. Nothing to commit."
   exit 0
 fi
-if [[ ! -f "$CONTENT/skills/index.v1.json" ]]; then
-  echo "No library index at .content/skills/index.v1.json. Run: npm run content:index"
+if [[ ! -f "$CONTENT/functions/index.v1.json" ]]; then
+  echo "No library index at .content/functions/index.v1.json. Run: npm run content:index"
   exit 0
 fi
 cd "$CONTENT"
-git add skills/index.v1.json skills/index/v1 2>/dev/null || true
+git add functions/index.v1.json functions/index/v1 2>/dev/null || true
 if git diff --staged --quiet 2>/dev/null; then
   echo "No index changes to commit in .content"
   exit 0
 fi
-git commit -m "chore: update library index (skills/index.v1.json and per-skill entries)"
+git commit -m "chore: update library index (functions/index.v1.json and per-function entries)"
 echo "Committed library index in .content"

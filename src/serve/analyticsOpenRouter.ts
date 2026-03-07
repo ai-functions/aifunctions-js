@@ -7,10 +7,16 @@
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
 export type OpenRouterCredits = {
-  /** Remaining credit balance in USD. */
-  balance: number;
+  /**
+   * Remaining credit balance in USD, or null when the account has no spending cap
+   * (pay-as-you-go / no hard limit set). null does NOT mean $0 — it means the
+   * account is billed per-use with a payment method attached.
+   */
+  balance: number | null;
   /** Total usage in USD over the account's lifetime. */
   usage: number;
+  /** True when limit is null (no hard spending cap; pay-as-you-go). */
+  isUnlimited: boolean;
   /** Whether the key is valid and active. */
   isActive: boolean;
   /** Raw response data from OpenRouter. */
@@ -64,10 +70,12 @@ export async function fetchOpenRouterCredits(apiKey: string): Promise<OpenRouter
   const data = raw?.data ?? {};
   const limit = typeof data.limit === "number" ? data.limit : null;
   const used = typeof data.usage === "number" ? data.usage : 0;
-  const balance = limit !== null ? Math.max(0, limit - used) : 0;
+  // null limit = no hard spending cap (pay-as-you-go). Return null, not 0.
+  const balance = limit !== null ? Math.max(0, limit - used) : null;
   return {
     balance,
     usage: used,
+    isUnlimited: limit === null,
     isActive: true,
     raw,
   };

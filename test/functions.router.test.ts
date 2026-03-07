@@ -67,7 +67,7 @@ describe("router", () => {
         await assert.rejects(
             async () => run("unknownSkill", {}),
             (err: Error) => {
-                assert.ok(err.message.includes("Unknown skill"));
+                assert.ok(err.message.includes("Unknown function") || err.message.includes("Unknown skill"));
                 assert.ok(err.message.includes("unknownSkill"));
                 return true;
             }
@@ -78,7 +78,7 @@ describe("router", () => {
         const captured: { system?: string } = {};
         const resolver = {
             get: async (key: string) =>
-                key === "skills/extractTopics/rules"
+                key === "functions/extractTopics/rules"
                     ? JSON.stringify([{ rule: "Must include a topics array.", weight: 1 }])
                     : undefined,
         };
@@ -108,7 +108,7 @@ describe("router", () => {
         const resolver = {
             resolveInstructions: async () => ({ text: "You extract topics. Return JSON with a topics array." }),
             get: async (key: string) =>
-                key === "skills/foo/rules" ? JSON.stringify([{ rule: "Output valid JSON only.", weight: 1 }]) : undefined,
+                key === "functions/foo/rules" ? JSON.stringify([{ rule: "Output valid JSON only.", weight: 1 }]) : undefined,
         };
         const result = (await runWithContent("foo", { input: "test" }, {
             resolver: resolver as never,

@@ -8,7 +8,7 @@
 ### Terminology
 
 - **Function**: canonical public term for an ability.
-- **Skill**: internal/content-store alias for the same ability (file path under `skills/<id>/...`).
+- **Skill**: internal/content-store alias for the same ability. Content is stored under **`functions/<id>/...`** (one folder per function).
 - `/skills/*` endpoints are kept for backward compatibility and act as aliases for function operations.
 
 ---

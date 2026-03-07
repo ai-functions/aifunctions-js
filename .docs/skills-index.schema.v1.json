@@ -2,7 +2,7 @@
   "schemaVersion": "1.0",
   "documents": {
     "perSkill": {
-      "pathPattern": "skills/index/v1/<skillId>.json",
+      "pathPattern": "functions/index/v1/<skillId>.json",
       "required": [
         "schemaVersion",
         "id",
@@ -22,7 +22,7 @@
           "type": "object",
           "required": ["files", "contentHash"],
           "fields": {
-            "contentPrefix": { "type": "string", "default": "skills/" },
+            "contentPrefix": { "type": "string", "default": "functions/" },
             "files": {
               "type": "array",
               "items": {
@@ -67,7 +67,7 @@
       }
     },
     "aggregate": {
-      "path": "skills/index.v1.json",
+      "path": "functions/index.v1.json",
       "required": ["schemaVersion", "generatedAt", "skills"],
       "fields": {
         "schemaVersion": { "type": "string", "const": "1.0" },
@@ -80,7 +80,7 @@
       }
     },
     "meta": {
-      "path": "skills/index/v1/_meta.json",
+      "path": "functions/index/v1/_meta.json",
       "required": ["schemaVersion", "generatedAt", "stats"],
       "fields": {
         "schemaVersion": { "type": "string", "const": "1.0" },
