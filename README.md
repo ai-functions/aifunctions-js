@@ -33,6 +33,8 @@ LLM "functions" start easy and get messy:
 
 ## Install
 
+**Node 18+** required (see `engines` in package.json).
+
 ```bash
 npm i aifunctions-js
 ```
@@ -99,7 +101,7 @@ functions/<id>/races.json        # race history (append-only, capped)
 
 Content can be loaded from a **git-backed resolver** (e.g. `.content` repo) or via a **content provider** (shared-store or inline). The library exports `createFunctionContentProvider` and `ResolverBackedContentProvider` for use with `run(skillName, request, { contentProvider, scopeId?, profile?, validateOutput? })`.
 
-**Docs:** [COLLECTIONS_MAPPING.md](docs/COLLECTIONS_MAPPING.md) describes what collections exist, their schema, and relationships (prerequisite). [DATA_MAPPING.md](docs/DATA_MAPPING.md) describes the actual records and data in each.
+**Docs:** [COLLECTIONS_MAPPING.md](docs/COLLECTIONS_MAPPING.md) and [DATA_MAPPING.md](docs/DATA_MAPPING.md) (when present in `docs/`) describe collections, schema, and data; see also [.docs/](.docs/) for in-repo design docs.
 
 Prompts are:
 - reviewable in PRs
@@ -279,7 +281,7 @@ TRANSFORMERS_JS_MODEL_ID=Xenova/distilbart-cnn-6-6
 
 ## REST API (optional, stateless)
 
-Expose functions and the full lifecycle over HTTP. Authoritative request/response shapes: [docs/API_CONTRACT.md](docs/API_CONTRACT.md). Server–contract sync status: [docs/CONTRACT_SYNC.md](docs/CONTRACT_SYNC.md).
+Expose functions and the full lifecycle over HTTP. Request/response shapes are described in this README and in the API contract when present (e.g. [docs/API_CONTRACT.md](docs/API_CONTRACT.md)); server–contract sync: [docs/CONTRACT_SYNC.md](docs/CONTRACT_SYNC.md). If `docs/` is not in your clone, the REST API section below is the endpoint reference.
 
 ```bash
 npm run build && npm run serve
@@ -293,7 +295,7 @@ npm run build && npm run serve
 | `x-api-key` | Authenticates to the server — validated against `LIGHT_SKILLS_API_KEY` env |
 | `x-openrouter-key` | BYOK — passed through to OpenRouter so each user can use their own key and billing |
 
-If `LIGHT_SKILLS_API_KEY` is not set, all requests are allowed.
+If neither `LIGHT_SKILLS_API_KEY` nor `AIFUNCTIONS_API_KEY` is set, all requests are allowed.
 
 ### Run and health
 
@@ -483,7 +485,7 @@ The `userTag` filter matches the attribution tag this package injects into the O
 | Var | Default | Description |
 |---|---|---|
 | `PORT` | `3780` | Server port |
-| `LIGHT_SKILLS_API_KEY` | — | If set, requires `x-api-key` header |
+| `LIGHT_SKILLS_API_KEY` | — | If set, requires `x-api-key` header (legacy: `AIFUNCTIONS_API_KEY`) |
 | `OPENROUTER_API_KEY` | — | Default OpenRouter key (overridden per-request by `x-openrouter-key`) |
 | `MAX_CONCURRENCY` | `10` | Max parallel LLM calls |
 | `RATE_LIMIT_PER_MINUTE` | `60` | Max run requests per minute per key (BYOK or server); responses include `X-RateLimit-Remaining`, `X-RateLimit-Reset` |
@@ -542,8 +544,7 @@ npm run typecheck    # TypeScript check
 
 - [Library functions — manual mode](.docs/LIBRARY-FUNCTIONS-MANUAL-MODE.md) — full list of built-in functions and programmatic use with rules/optimization
 - [Library index: JSON and API](.docs/library-index-json-and-api.md) — index format, update commands, and HTTP API for the catalog
-- [API contract](docs/API_CONTRACT.md) — authoritative request/response shapes for the REST server
-- [Contract sync](docs/CONTRACT_SYNC.md) — server–contract sync status
+- [API contract](docs/API_CONTRACT.md) and [Contract sync](docs/CONTRACT_SYNC.md) — when present in `docs/`; otherwise the REST API section above is the source of truth for endpoints
 
 ## Links
 
