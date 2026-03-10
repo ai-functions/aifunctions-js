@@ -25,7 +25,7 @@ export async function createRelease(
   resolver: ContentResolver,
   input: CreateReleaseInput
 ): Promise<ScopeRelease> {
-  const instruction = await getSkillInstructions(resolver, input.functionId, "strong");
+  const instruction = await getSkillInstructions(resolver, input.functionId);
   const rules = await getSkillRules(resolver, input.functionId);
   const effectiveDefinitionHashValue = effectiveDefinitionHash(instruction, rules);
   const applied = await getAppliedProfileSet(resolver, input.functionId, input.scopeId);

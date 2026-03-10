@@ -1,6 +1,6 @@
 {
   "name": "aifunctions-js",
-  "version": "2.5.5",
+  "version": "2.5.6",
   "description": "Minimal ask() API for remote (OpenRouter) and local (llama.cpp / Transformers.js) LLMs",
   "type": "module",
   "main": "./dist/index.cjs",
