@@ -1,5 +1,6 @@
-import { createClient, getSkillsResolver, getSkillNamesFromContent, getProfiles, resolveSkillInstructions, getSkillRules, resolveSkillRules } from "../src/index.js";
-import type { Client } from "../src/index.js";
+import { createClient, getSkillsResolver, getSkillNamesFromContent, resolveRuntimeService, resolveSkillInstructions, getSkillRules, resolveSkillRules } from "../src/index.js";
+import type { Client, FunctionContentProvider } from "../src/index.js";
+import type { ProfileKey } from "../src/index.js";
 import type { ContentResolver } from "nx-content";
 import { executeSkill } from "./core/executor.js";
 import { buildRequestPrompt } from "./core/prompt.js";
@@ -112,10 +113,16 @@ const PRIMARY_SKILL_NAMES: string[] = [
 export type RunOptions = {
   /** Content resolver for dynamic skills (from git). When skill is not built-in, run() uses this to run via runWithContent. Default: getSkillsResolver() if skill not in registry. */
   resolver?: ContentResolver;
+  /** When set, function content (instructions, rules) is resolved through this provider instead of the resolver. Resolver is still used for applied profile / legacy profiles when needed. */
+  contentProvider?: FunctionContentProvider;
   /** When true and resolver is set, validate the skill result against the library index io.output schema and return { result, validation }. Never throws on validation failure; validation.valid and validation.errors indicate contract compliance. */
   validateOutput?: boolean;
   /** Optional LLM client (e.g. BYOK). Merged into request for built-in skills; passed to runWithContent for content skills. */
   client?: Client;
+  /** Scope for runtime resolution (applied profile / release). Omit or "default" for legacy fallback. */
+  scopeId?: string;
+  /** Profile key (best, cheapest, fastest, balanced) for model selection. When set with scopeId or default scope, runtime resolves model from applied profile set or legacy race-config. */
+  profile?: ProfileKey;
 };
 
 /** Return type when run() is called with validateOutput: true. Result is always returned; validation indicates whether it passed the contract. */
@@ -139,7 +146,14 @@ export async function run(
   let result: unknown;
   if (fn) {
     let rules: Array<{ rule: string; weight: number }> = [];
-    if (options?.resolver) {
+    if (options?.contentProvider) {
+      try {
+        const content = await options.contentProvider.getFunctionContent({ functionId: skill });
+        rules = Array.isArray(content.rules) ? (content.rules as Array<{ rule: string; weight: number }>) : [];
+      } catch {
+        // no content for this skill
+      }
+    } else if (options?.resolver) {
       rules = await getSkillRules(options.resolver, skill);
       if (rules.length === 0) rules = await resolveSkillRules(options.resolver, skill);
     }
@@ -149,12 +163,24 @@ export async function run(
     result = await fn(req, { rules });
   } else {
     const resolver = options?.resolver ?? getSkillsResolver();
-    const fromContent = await getSkillNamesFromContent(resolver);
-    if (!fromContent.includes(skill)) {
-      const available = [...getSkillNames(), ...fromContent];
-      throw new Error(`Unknown function: ${skill}. Available: ${available.join(", ")}`);
+    if (options?.contentProvider) {
+      const has = options.contentProvider.hasFunction?.({ functionId: skill });
+      const hasFunction = has !== undefined ? await has : (await options.contentProvider.listFunctions?.())?.includes(skill) ?? false;
+      if (!hasFunction) {
+        const builtIn = getSkillNames();
+        const fromContent = options.contentProvider.listFunctions ? await options.contentProvider.listFunctions() : [];
+        const available = [...builtIn, ...fromContent];
+        throw new Error(`Unknown function: ${skill}. Available: ${available.join(", ")}`);
+      }
+      result = await runWithContent(skill, request, { resolver, contentProvider: options.contentProvider, client: options?.client, scopeId: options?.scopeId, profile: options?.profile });
+    } else {
+      const fromContent = await getSkillNamesFromContent(resolver);
+      if (!fromContent.includes(skill)) {
+        const available = [...getSkillNames(), ...fromContent];
+        throw new Error(`Unknown function: ${skill}. Available: ${available.join(", ")}`);
+      }
+      result = await runWithContent(skill, request, { resolver, client: options?.client, scopeId: options?.scopeId, profile: options?.profile });
     }
-    result = await runWithContent(skill, request, { resolver, client: options?.client });
   }
   if (options?.validateOutput && options?.resolver) {
     const validation = await validateOutput(skill, result, { resolver: options.resolver });
@@ -227,66 +253,60 @@ export async function getSkillNamesAsync(
   return [...new Set([...builtIn, ...fromContent])];
 }
 
-/** Mode for content-resolved instructions. Profile modes (best/cheapest/fastest/balanced) resolve from race results; weak/normal/strong/ultra use instruction files. */
+/** Mode for content-resolved instructions. Profile modes (best/cheapest/fastest/balanced) resolve from applied profile set or legacy race results; weak/normal/strong/ultra use instruction files. */
 export type ContentSkillMode = "weak" | "normal" | "strong" | "ultra" | "best" | "cheapest" | "fastest" | "balanced";
 
 export type RunWithContentOptions = {
-  /** Content resolver (e.g. from getSkillsResolver()). Required for runWithContent. */
+  /** Content resolver (e.g. from getSkillsResolver()). Required for runtime resolution (applied profile / legacy profiles). */
   resolver: ContentResolver;
+  /** When set, instructions and rules are loaded from this provider instead of the resolver. */
+  contentProvider?: FunctionContentProvider;
   /** Client for the LLM call. Default: createClient({ backend: "openrouter" }). */
   client?: Client;
   /** Mode for instruction variant. Default: (request as { mode?: ContentSkillMode }).mode ?? "normal". */
   mode?: ContentSkillMode;
+  /** Scope for runtime resolution (applied profile). Omit or "default" for legacy fallback. */
+  scopeId?: string;
+  /** Profile key for model selection (best, cheapest, fastest, balanced). */
+  profile?: ProfileKey;
 };
-
-const PROFILE_MODES: ContentSkillMode[] = ["best", "cheapest", "fastest", "balanced"];
 
 /**
  * Run a skill by name using instructions (and optionally rules) resolved from content.
- * When mode is best/cheapest/fastest/balanced, resolves model/temperature/maxTokens from stored race profiles; fails with an actionable error if no profile exists.
+ * Execution path: RuntimeResolutionService.resolve(functionId, scopeId, profile) → runtime.content, runtime.selectedModel → execute.
  */
 export async function runWithContent(
   skillName: string,
   request: unknown,
   options: RunWithContentOptions
 ): Promise<unknown> {
-  const { resolver, client: providedClient } = options;
-  const req = request as { mode?: ContentSkillMode };
+  const { resolver, contentProvider, client: providedClient, scopeId, profile } = options;
+  const req = request as { mode?: ContentSkillMode; modelOverride?: string };
   const mode: ContentSkillMode = options.mode ?? req.mode ?? "normal";
   const client = providedClient ?? createClient({ backend: "openrouter" });
 
-  const instructionMode: "weak" | "normal" | "strong" = PROFILE_MODES.includes(mode) ? "normal" : mode === "weak" ? "weak" : "strong";
-  const instruction = await resolveSkillInstructions(resolver, skillName, instructionMode);
-  let rules = await getSkillRules(resolver, skillName);
-  if (rules.length === 0) rules = await resolveSkillRules(resolver, skillName);
+  const instructionMode: "weak" | "normal" | "strong" = (mode === "best" || mode === "cheapest" || mode === "fastest" || mode === "balanced") ? "normal" : mode === "weak" ? "weak" : "strong";
+  const runtime = await resolveRuntimeService(
+    {
+      functionId: skillName,
+      scopeId: scopeId ?? "default",
+      profile: profile ?? (mode as ProfileKey),
+      mode,
+      modelOverride: req.modelOverride,
+    },
+    { resolver, contentProvider, instructionMode }
+  );
 
-  if (PROFILE_MODES.includes(mode)) {
-    const { profiles } = await getProfiles(resolver, skillName);
-    const profile = profiles?.[mode as keyof typeof profiles];
-    if (!profile?.model) {
-      throw new Error(
-        `No race profile for mode "${mode}" on function "${skillName}". Run a race first (POST /race/models with functionKey) to set winner profiles.`
-      );
-    }
-    return executeSkill<unknown>({
-      request,
-      buildPrompt: (r) => `# ${skillName}\n\n` + buildRequestPrompt(r),
-      instructions: { weak: instruction, normal: instruction, strong: instruction },
-      rules,
-      client,
-      mode: "normal",
-      model: profile.model,
-      temperature: profile.temperature,
-      maxTokens: profile.maxTokens,
-    });
-  }
-
+  const instructions = { weak: runtime.content.instruction, normal: runtime.content.instruction, strong: runtime.content.instruction };
   return executeSkill<unknown>({
     request,
     buildPrompt: (r) => `# ${skillName}\n\n` + buildRequestPrompt(r),
-    instructions: { weak: instruction, normal: instruction, strong: instruction },
-    rules,
+    instructions,
+    rules: runtime.content.rules,
     client,
-    mode: mode === "ultra" ? "strong" : (mode as "weak" | "normal" | "strong"),
+    mode: "normal",
+    model: runtime.selectedModel,
+    temperature: runtime.temperature,
+    maxTokens: runtime.maxTokens,
   });
 }

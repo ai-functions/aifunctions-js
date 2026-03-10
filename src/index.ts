@@ -35,6 +35,32 @@ export { NxAiApiError } from "./core/errors.js";
 export type { NxAiApiErrorCode } from "./core/errors.js";
 
 export {
+  createFunctionContentProvider,
+  getDefaultContentProvider,
+} from "./content/createFunctionContentProvider.js";
+export { ResolverBackedContentProvider } from "./content/resolverBackedContentProvider.js";
+export type {
+  AiFunctionsContentConfig,
+  FunctionContentProvider,
+  GetFunctionContentInput,
+  HasFunctionInput,
+  InlineFunctionDefinition,
+  InstructionMode,
+  ListFunctionsInput,
+  ResolvedFunctionContent,
+  SharedStoreConfig,
+  StoreClient,
+} from "./content/functionContentProvider.js";
+export {
+  FunctionContentError,
+  FunctionContentNotFoundError,
+  FunctionContentParseError,
+  FunctionContentConfigError,
+} from "./content/functionContentErrors.js";
+export { getStoreKeys } from "./content/storeKeys.js";
+export type { FunctionStoreKeys } from "./content/storeKeys.js";
+
+export {
   getSkillsResolver,
   getSkillNamesFromContent,
   getSkillInstructions,
@@ -93,6 +119,33 @@ export type {
   RaceRecord,
   GetRaceReportOptions,
 } from "./content/raceStorage.js";
+
+export type {
+  EvaluationSession,
+  AppliedProfileSet,
+  ScopeRelease,
+  RuntimeResolutionInput,
+  RuntimeResolution,
+  ResolvedRuntime,
+  ProfileKey,
+} from "./content/scopedRuntime.js";
+export { resolveRuntime } from "./content/runtimeResolver.js";
+export type { ResolveRuntimeOptions } from "./content/runtimeResolver.js";
+export { resolve as resolveRuntimeService, getEffectiveDefinition } from "./domain/runtimeResolutionService.js";
+export type { RuntimeResolutionServiceOptions, GetEffectiveDefinitionOptions } from "./domain/runtimeResolutionService.js";
+export type { AiFunctionRunInput } from "./types/run.js";
+export { effectiveDefinitionHash, judgeRulesHash } from "./domain/hash.js";
+export {
+  getAppliedProfileSet,
+  setAppliedProfileSet,
+  getEffectiveProfiles,
+} from "./content/appliedProfileStore.js";
+export { saveEvaluationSession, getEvaluationSession } from "./content/evaluationSessionStore.js";
+export { applyEvaluation } from "./domain/applyEvaluationService.js";
+export type { ApplyEvaluationInput } from "./domain/applyEvaluationService.js";
+export { createRelease, getReleases, getRelease } from "./domain/releaseService.js";
+export type { CreateReleaseInput } from "./domain/releaseService.js";
+export { saveScopeRelease, getScopeRelease, listScopeReleases } from "./content/scopeReleaseStore.js";
 
 export {
   DEFAULT_SKILLS_REPO_URL,

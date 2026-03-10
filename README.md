@@ -76,24 +76,28 @@ const result = await run("extract-invoice-lines", { text: invoiceText });
 // → { lines: [{ description: "...", amount: 4500 }, ...] }
 ```
 
+**Full list (manual mode):** All library functions are available for programmatic use with rules and optimization. See [Library functions — manual mode](.docs/LIBRARY-FUNCTIONS-MANUAL-MODE.md) for the complete list and how to run them by name with a content provider or resolver.
+
 ---
 
 ## Core concepts
 
 ### Function packs (file-based prompts)
 
-Functions live as files in a content store (git repo or local folder):
+Functions live as files in a content store (git repo or local folder). Canonical paths use the **`functions/`** prefix:
 
 ```
-skills/<skillId>/weak      # local/cheap instructions
-skills/<skillId>/strong    # cloud/high-quality instructions
-skills/<skillId>/ultra     # optional highest-tier instructions
-skills/<skillId>/rules     # optional judge rules (JSON)
-skills/<skillId>/meta.json # status: draft | released, version, scoreGate
-skills/<skillId>/test-cases.json  # stored test cases for validate/optimize
-skills/<skillId>/race-config.json # race defaults + winner profiles (best/cheapest/fastest/balanced)
-skills/<skillId>/races.json       # race history (append-only, capped)
+functions/<id>/weak       # local/cheap instructions
+functions/<id>/strong     # cloud/high-quality instructions (mode "normal" uses this)
+functions/<id>/ultra      # optional highest-tier instructions
+functions/<id>/rules      # optional judge rules (JSON)
+functions/<id>/meta.json  # status: draft | released, version, scoreGate
+functions/<id>/test-cases.json   # stored test cases for validate/optimize
+functions/<id>/race-config.json  # race defaults + winner profiles (best/cheapest/fastest/balanced)
+functions/<id>/races.json        # race history (append-only, capped)
 ```
+
+Content can be loaded from a **git-backed resolver** (e.g. `.content` repo) or via a **content provider** (shared-store or inline). The library exports `createFunctionContentProvider` and `ResolverBackedContentProvider` for use with `run(skillName, request, { contentProvider, scopeId?, profile?, validateOutput? })`.
 
 **Docs:** [COLLECTIONS_MAPPING.md](docs/COLLECTIONS_MAPPING.md) describes what collections exist, their schema, and relationships (prerequisite). [DATA_MAPPING.md](docs/DATA_MAPPING.md) describes the actual records and data in each.
 
@@ -305,7 +309,7 @@ GET  /functions               list functions
 GET  /functions/:id           function detail with status, version, last validation, currentInstructions, currentRules, currentRulesCount
 ```
 
-Run responses include `requestId` (same as attribution `traceId` when provided). When the function is in draft status, the response includes `draft: true`. Pass `options.trace: true` in the run body to receive a `trace` object with the full prompt(s), model selection, and model used per call (for that request only; not stored). Run endpoints are rate-limited per key (see `RATE_LIMIT_PER_MINUTE`) and return `X-RateLimit-Remaining` and `X-RateLimit-Reset` headers.
+Run request body may include `options.scopeId` and `options.profile` (`best` | `cheapest` | `fastest` | `balanced`) for scope-specific model selection; `options.validateOutput: true` returns `{ result, validation }` against the library index schema. Run responses include `requestId` (same as attribution `traceId` when provided). When the function is in draft status, the response includes `draft: true`. Pass `options.trace: true` in the run body to receive a `trace` object with the full prompt(s), model selection, and model used per call (for that request only; not stored). Run endpoints are rate-limited per key (see `RATE_LIMIT_PER_MINUTE`) and return `X-RateLimit-Remaining` and `X-RateLimit-Reset` headers.
 
 Run `mode` may be `weak`, `normal`, `strong`, `ultra`, or profile modes `best`, `cheapest`, `fastest`, `balanced`. Profile modes require a race to have been run first; otherwise the server returns `422` `NO_RACE_PROFILE`.
 
@@ -316,12 +320,14 @@ Create a function, iterate on it, validate quality, then release it to a stable 
 ```
 POST /functions               create: { id, seedInstructions, scoreGate?, rules? }
 POST /functions/:id:validate  run schema + semantic scoring → { passed, scoreNormalized, cases }
-POST /functions/:id:release   promote to released (blocked if score < scoreGate)
+POST /functions/:id:release   promote to released (blocked if score < scoreGate). Body may include `scopeId` for scope-specific release.
 POST /functions/:id:rollback  set current instructions/rules to a previous version (body: `{ version: gitRef }`; requires version APIs)
 POST /functions/:id:optimize  rewrite instructions in-place
 POST /functions/:id:push      push to remote git repo (requires SKILLS_LOCAL_PATH)
-GET  /functions/:id/versions instruction version history (git shas)
+GET  /functions/:id/versions  instruction version history (git shas)
 POST /functions/:id/versions/:version/run  run at a pinned version (ref = git sha from versions list)
+GET  /functions/:id/scopes    query: scopeId required → { functionId, scopeId, releases }
+POST /functions/:id/apply    apply evaluation result to scope (body: { scopeId?, evaluationSessionId, appliedBy? }) → { appliedProfileSet, scopeId, functionId }
 GET  /functions/:id/test-cases
 PUT  /functions/:id/test-cases  { testCases: [{ id, input, expectedOutput? }] }
 POST /functions/:id/save-optimization  persist instructions, rules, examples from optimization wizard
@@ -365,10 +371,11 @@ GET /jobs/:id/logs      streaming log lines
 ### Content workflows
 
 ```
-POST /content/sync
-POST /content/index
-POST /content/fixtures
-POST /content/layout-lint
+POST /content/sync         sync instructions to content store (and optional push)
+POST /content/index        build library index (body: { prefix?: "functions/" }) → { indexed, skills, errors }
+POST /content/index/full   build and return full embedded library snapshot (body: prefix?, staticOnly?, writeDocsFallback?) → { fullSnapshot, ... }; writes .docs/library-index.full.fallback.json by default
+POST /content/fixtures      validate examples vs io.output schemas
+POST /content/layout-lint  enforce folder-based layout under functions/
 ```
 
 ### Cost estimation
@@ -489,14 +496,19 @@ Run endpoints enforce a 100KB max request body (413 when exceeded). Backend defa
 
 ---
 
-## Content (skills repo) workflow
+## Content (functions repo) workflow
 
 ```bash
-npm run content:sync           # sync instructions to .content and push
-npm run content:sync:optimize  # optimize instructions (requires OPENROUTER_API_KEY)
-npm run content:index          # build library index (schemas/examples)
-npm run content:fixtures       # validate examples vs io.output schemas
-npm run content:layout-lint    # enforce folder-based layout
+npm run content:sync              # sync instructions to .content and push
+npm run content:sync:optimize     # optimize instructions (requires OPENROUTER_API_KEY)
+npm run content:index             # build library index with LLM (schemas/examples; needs OPENROUTER_API_KEY)
+npm run content:index:static      # build library index from content only (no LLM)
+npm run content:index:copy-fallback    # copy built index to .docs/library-index.fallback.json
+npm run content:index:copy-full-fallback # build full snapshot and write .docs/library-index.full.fallback.json
+npm run content:index:real        # content:index + copy-fallback
+npm run content:index:real:full   # content:index + copy-fallback + copy-full-fallback
+npm run content:fixtures          # validate examples vs io.output schemas
+npm run content:layout-lint      # enforce folder-based layout under functions/
 ```
 
 ---
@@ -526,6 +538,14 @@ npm run typecheck    # TypeScript check
 
 ---
 
+## Documentation
+
+- [Library functions — manual mode](.docs/LIBRARY-FUNCTIONS-MANUAL-MODE.md) — full list of built-in functions and programmatic use with rules/optimization
+- [Library index: JSON and API](.docs/library-index-json-and-api.md) — index format, update commands, and HTTP API for the catalog
+- [API contract](docs/API_CONTRACT.md) — authoritative request/response shapes for the REST server
+- [Contract sync](docs/CONTRACT_SYNC.md) — server–contract sync status
+
 ## Links
 
-- GitHub: [https://github.com/ai-functions/aifunctions-js](https://github.com/ai-functions/aifunctions-js)
+- GitHub: [nx-intelligence/light-skills](https://github.com/nx-intelligence/light-skills) (repository and homepage)
+- npm package name: `aifunctions-js`

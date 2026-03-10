@@ -64,8 +64,9 @@ describe("router", () => {
     });
 
     it("run(unknownSkill, {}) throws with message including available skills", async () => {
+        const resolverNoContent = { listKeys: async () => [] as string[] };
         await assert.rejects(
-            async () => run("unknownSkill", {}),
+            async () => run("unknownSkill", {}, { resolver: resolverNoContent as never }),
             (err: Error) => {
                 assert.ok(err.message.includes("Unknown function") || err.message.includes("Unknown skill"));
                 assert.ok(err.message.includes("unknownSkill"));

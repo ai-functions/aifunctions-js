@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import {
   getSkillsResolver,
+  getDefaultContentProvider,
   getLibraryIndex,
   updateLibraryIndex,
   buildFullLibrarySnapshot,
@@ -35,8 +36,15 @@ import {
   getProfiles,
   getRaceReport,
   resolveSkillInstructions,
+  saveEvaluationSession,
+  effectiveDefinitionHash,
+  judgeRulesHash,
+  applyEvaluation,
+  createRelease,
+  getReleases,
 } from "./index.js";
 import type { RaceRecord, RaceProfile } from "./content/raceStorage.js";
+import type { EvaluationSession } from "./content/scopedRuntime.js";
 import {
   run,
   getSkillNames,
@@ -249,15 +257,18 @@ async function handleRun(
 ): Promise<void> {
   const rlHeaders = rateLimitResult ? rateLimitHeaders(rateLimitResult) : undefined;
   const skill = skillFromPath ?? (body as { skill?: string })?.skill;
-  const rawBody = body as { input?: unknown; request?: unknown; options?: { validate?: boolean; trace?: boolean }; mode?: string };
+  const rawBody = body as { input?: unknown; request?: unknown; options?: { validate?: boolean; trace?: boolean }; mode?: string; scopeId?: string; profile?: string };
   const request = rawBody?.input ?? rawBody?.request ?? body;
   const validateOption = rawBody?.options?.validate;
   const traceOption = rawBody?.options?.trace === true;
+  const scopeId = typeof rawBody?.scopeId === "string" && rawBody.scopeId.trim() ? rawBody.scopeId.trim() : undefined;
+  const profile = typeof rawBody?.profile === "string" && rawBody.profile.trim() ? rawBody.profile.trim() as "best" | "cheapest" | "fastest" | "balanced" : undefined;
   if (typeof skill !== "string" || !skill.trim()) {
     sendError(res, 400, "function must be a non-empty string", "INVALID_INPUT", rlHeaders);
     return;
   }
   const resolver = getSkillsResolver();
+  const contentProvider = getDefaultContentProvider();
   const validateOutput =
     validateOption === true ||
     process.env.VALIDATE_SKILL_OUTPUT === "1" ||
@@ -276,7 +287,7 @@ async function handleRun(
 
   try {
     const out = await concurrencyGuard(() =>
-      run(skill.trim(), request ?? {}, { resolver, validateOutput, client })
+      run(skill.trim(), request ?? {}, { resolver, contentProvider, validateOutput, client, scopeId, profile })
     );
     const usage = tracker ? toUsageResponse(tracker.getUsage()) : null;
     if (tracker) {
@@ -869,7 +880,10 @@ async function handleRaceModels(res: import("node:http").ServerResponse, body: u
     tokenValues?: number[];
     temperature?: number;
     functionKey?: string;
+    scopeId?: string;
     applyDefaults?: boolean;
+    /** If true, also write to legacy race-config/races (transition only). Primary path creates EvaluationSession only. */
+    legacyApply?: boolean;
     raceLabel?: string;
     notes?: string;
   };
@@ -957,7 +971,9 @@ async function handleRaceModels(res: import("node:http").ServerResponse, body: u
   updateJob(id, { status: "running" });
   sendOk(res, { jobId: id, status: "running", totalRuns });
   const functionKey = b.functionKey?.trim();
+  const scopeId = b.scopeId?.trim() || "default";
   const applyDefaults = b.applyDefaults !== false;
+  const legacyApply = b.legacyApply === true;
   const raceLabel = b.raceLabel;
   const notes = b.notes;
   (async () => {
@@ -965,14 +981,11 @@ async function handleRaceModels(res: import("node:http").ServerResponse, body: u
       const result = await concurrencyGuard(() => raceModels(request));
       if (functionKey && result && typeof result === "object" && "ranking" in result && "bestModelId" in result) {
         const resolver = getSkillsResolver();
-        const ranking = (result as { ranking: Array<{ modelId: string; avgScoreNormalized: number; passRate: number; avgLostPoints: number }> }).ranking;
         const details = (result as { details: Array<{ modelId: string; perTest: Array<{ judge: { scoreNormalized: number; lostPoints: number } }> }> }).details;
         const attempts = details.map((d) => {
           const n = d.perTest?.length ?? 0;
           const perTest = d.perTest as Array<{ judge: { scoreNormalized: number; lostPoints: number; pass?: boolean } }>;
           const candidate = request.models?.find((m: { id: string }) => m.id === d.modelId) as { id: string; model: string; options?: { maxTokens?: number; temperature?: number } } | undefined;
-          // costSnapshot: use pricing rate proxy (1000 prompt + 500 completion) as relative cost indicator.
-          // Actual per-model tokens are not tracked at the race level; this is a ranking proxy only.
           const costSnapshot = candidate ? lookupCost(candidate.model, 1000, 500) : null;
           return {
             modelId: d.modelId,
@@ -984,44 +997,70 @@ async function handleRaceModels(res: import("node:http").ServerResponse, body: u
         });
         const bestModelId = (result as { bestModelId: string }).bestModelId;
         const bestCandidate = request.models?.find((m: { id: string }) => m.id === bestModelId) as { id: string; model: string; options?: { maxTokens?: number; temperature?: number } } | undefined;
-        // cheapest: attempt with the lowest costSnapshot (proxy for price per token); fallback to best.
         const attemptsWithCost = attempts.filter((a) => a.costSnapshot != null);
         const cheapestAttempt = attemptsWithCost.length > 0
           ? attemptsWithCost.reduce((min, a) => (a.costSnapshot! < min.costSnapshot! ? a : min))
           : null;
         const cheapestModelId = cheapestAttempt?.modelId ?? bestModelId;
         const cheapestCandidate = request.models?.find((m: { id: string }) => m.id === cheapestModelId) as { id: string; model: string; options?: { maxTokens?: number; temperature?: number } } | undefined;
-        const raceId = `${new Date().toISOString().replace(/[:.]/g, "-")}#${id}`;
-        const record: RaceRecord = {
-          raceId,
+        const runAt = new Date().toISOString();
+        const sessionId = `${runAt.replace(/[:.]/g, "-")}#${id}`;
+        const instruction = request.skill?.strongSystem ?? "";
+        const rules = (request as { judgeRules?: JudgeRule[] }).judgeRules ?? [];
+        const effectiveDefinitionHashValue = effectiveDefinitionHash(instruction, rules);
+        const judgeRulesHashValue = judgeRulesHash(rules);
+        const session: EvaluationSession = {
+          sessionId,
+          functionId: functionKey,
+          scopeId,
+          effectiveDefinitionHash: effectiveDefinitionHashValue,
+          judgeRulesHash: judgeRulesHashValue,
+          contentFingerprint: effectiveDefinitionHashValue,
           type: raceType,
           label: raceLabel,
           notes,
-          applyDefaults,
           candidates: { models: request.models },
-          attempts: attempts as RaceRecord["attempts"],
+          attempts,
           winners: { best: bestModelId, cheapest: cheapestModelId, fastest: bestModelId, balanced: bestModelId },
-          runAt: new Date().toISOString(),
+          runAt,
           summary: (result as { summary?: string }).summary,
         };
-        await appendRace(resolver, functionKey, record);
-        if (applyDefaults && bestCandidate) {
-          const bestProfile: RaceProfile = {
-            model: bestCandidate.model,
-            temperature: bestCandidate.options?.temperature,
-            maxTokens: bestCandidate.options?.maxTokens,
+        await saveEvaluationSession(resolver, session);
+        const resultWithSession = { ...(result as object), evaluationSession: session, evaluationSessionId: sessionId };
+        if (legacyApply) {
+          const record: RaceRecord = {
+            raceId: sessionId,
+            type: raceType,
+            label: raceLabel,
+            notes,
+            applyDefaults,
+            candidates: { models: request.models },
+            attempts: attempts as RaceRecord["attempts"],
+            winners: { best: bestModelId, cheapest: cheapestModelId, fastest: bestModelId, balanced: bestModelId },
+            runAt,
+            summary: (result as { summary?: string }).summary,
           };
-          const cheapestProfile: RaceProfile = cheapestCandidate
-            ? { model: cheapestCandidate.model, temperature: cheapestCandidate.options?.temperature, maxTokens: cheapestCandidate.options?.maxTokens }
-            : bestProfile;
-          await setProfiles(resolver, functionKey, { best: bestProfile, cheapest: cheapestProfile, fastest: bestProfile, balanced: bestProfile });
+          await appendRace(resolver, functionKey, record);
+          if (applyDefaults && bestCandidate) {
+            const bestProfile: RaceProfile = {
+              model: bestCandidate.model,
+              temperature: bestCandidate.options?.temperature,
+              maxTokens: bestCandidate.options?.maxTokens,
+            };
+            const cheapestProfile: RaceProfile = cheapestCandidate
+              ? { model: cheapestCandidate.model, temperature: cheapestCandidate.options?.temperature, maxTokens: cheapestCandidate.options?.maxTokens }
+              : bestProfile;
+            await setProfiles(resolver, functionKey, { best: bestProfile, cheapest: cheapestProfile, fastest: bestProfile, balanced: bestProfile });
+          }
+          if (applyDefaults && raceType === "temperature" && b.temperatures?.length === 1) {
+            const defaultMaxTokens = bestCandidate?.options?.maxTokens ?? 2048;
+            await setDefaults(resolver, functionKey, { maxTokens: defaultMaxTokens });
+          }
         }
-        if (applyDefaults && raceType === "temperature" && b.temperatures?.length === 1) {
-          const defaultMaxTokens = bestCandidate?.options?.maxTokens ?? 2048;
-          await setDefaults(resolver, functionKey, { maxTokens: defaultMaxTokens });
-        }
+        updateJob(id, { status: "completed", progress: 1, result: resultWithSession });
+      } else {
+        updateJob(id, { status: "completed", progress: 1, result });
       }
-      updateJob(id, { status: "completed", progress: 1, result });
     } catch (e) {
       updateJob(id, { status: "failed", error: e instanceof Error ? e.message : String(e), errorCode: "OPENROUTER_HTTP_ERROR" });
     }
@@ -1375,10 +1414,53 @@ async function handleRollbackFunction(res: import("node:http").ServerResponse, n
   }
 }
 
-async function handleReleaseFunction(res: import("node:http").ServerResponse, name: string): Promise<void> {
+async function handleApplyEvaluation(
+  res: import("node:http").ServerResponse,
+  functionId: string,
+  scopeId: string,
+  evaluationSessionId: string,
+  appliedBy?: string
+): Promise<void> {
   const resolver = getSkillsResolver();
   try {
+    const names = await getSkillNamesAsync(resolver);
+    if (!names.includes(functionId)) {
+      sendError(res, 404, `Function '${functionId}' not found`, "FUNCTION_NOT_FOUND");
+      return;
+    }
+    const applied = await applyEvaluation(resolver, { functionId, scopeId, evaluationSessionId, appliedBy });
+    sendOk(res, { appliedProfileSet: applied, scopeId, functionId });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes("not found")) {
+      sendError(res, 404, message, "EVALUATION_SESSION_NOT_FOUND");
+    } else {
+      sendError(res, 500, message, "APPLY_ERROR");
+    }
+  }
+}
+
+async function handleReleaseFunction(res: import("node:http").ServerResponse, name: string, body?: unknown): Promise<void> {
+  const resolver = getSkillsResolver();
+  const scopeId = (body as { scopeId?: string })?.scopeId?.trim();
+  try {
     const meta = await getFunctionMeta(resolver, name);
+    if (scopeId) {
+      const release = await createRelease(resolver, {
+        functionId: name,
+        scopeId,
+        score: meta.lastValidation?.score,
+      });
+      sendOk(res, {
+        scopeRelease: release,
+        scopeId,
+        functionId: name,
+        version: release.version,
+        releasedAt: release.releasedAt,
+        endpoint: `/functions/${name}/scopes/${scopeId}/releases/${release.version}`,
+      });
+      return;
+    }
     if (!meta.lastValidation) {
       sendError(res, 422, "Function must be validated before release. Call POST /functions/:id:validate first.", "NOT_VALIDATED"); return;
     }
@@ -1790,7 +1872,11 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
         if (method === "POST" && segments.length === 2 && fnSegment.endsWith(action)) {
           const cleanId = fnSegment.slice(0, -action.length);
           if (action === ":validate") { await handleValidateFunction(res, cleanId, req); return; }
-          if (action === ":release") { await handleReleaseFunction(res, cleanId); return; }
+          if (action === ":release") {
+            try { const body = await readJsonBody(req); await handleReleaseFunction(res, cleanId, body); }
+            catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+            return;
+          }
           if (action === ":rollback") {
             try { const body = await readJsonBody(req); await handleRollbackFunction(res, cleanId, body); }
             catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
@@ -1873,6 +1959,35 @@ async function handler(req: import("node:http").IncomingMessage, res: import("no
         if (method === "POST" && sub === "save-optimization") {
           try { const body = await readJsonBody(req); await handleSaveOptimization(res, body, fnSegment); }
           catch (e) { sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT"); }
+          return;
+        }
+        if (method === "POST" && sub === "apply") {
+          try {
+            const body = await readJsonBody(req);
+            const b = body as { scopeId?: string; evaluationSessionId?: string; appliedBy?: string };
+            const scopeId = typeof b.scopeId === "string" && b.scopeId.trim() ? b.scopeId.trim() : "default";
+            if (typeof b.evaluationSessionId !== "string" || !b.evaluationSessionId.trim()) {
+              sendError(res, 400, "evaluationSessionId is required", "INVALID_INPUT");
+              return;
+            }
+            await handleApplyEvaluation(res, fnSegment, scopeId, b.evaluationSessionId.trim(), b.appliedBy);
+          } catch (e) {
+            sendError(res, 400, e instanceof Error ? e.message : String(e), "INVALID_INPUT");
+          }
+          return;
+        }
+        if (method === "GET" && sub === "scopes") {
+          try {
+            const scopeId = query.scopeId as string | undefined;
+            if (scopeId) {
+              const releases = await getReleases(getSkillsResolver(), fnSegment, scopeId);
+              sendOk(res, { functionId: fnSegment, scopeId, releases });
+            } else {
+              sendError(res, 400, "scopeId query required for GET /functions/:id/scopes", "INVALID_INPUT");
+            }
+          } catch (e) {
+            sendError(res, 500, e instanceof Error ? e.message : String(e), "SCOPE_RELEASES_ERROR");
+          }
           return;
         }
       }
