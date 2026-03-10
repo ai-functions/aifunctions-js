@@ -240,7 +240,7 @@ import { createClient } from "aifunctions-js";
 const ai = createClient({ backend: "openrouter" });
 
 const res = await ai.ask("Write a product tagline.", {
-  model: "openai/gpt-4o",
+  model: "openai/gpt-5-nano",
   maxTokens: 200,
   temperature: 0.7,
 });
