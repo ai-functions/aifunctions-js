@@ -2,6 +2,7 @@ import type { AskOptions, AskResult, CreateClientOptions } from "../core/types.j
 import { NxAiApiError } from "../core/errors.js";
 import { resolveOptionsFromMode } from "../core/modePreset.js";
 import { normalizeUsage } from "../core/usage.js";
+import { applyResponseFormatToAskResult } from "../core/responseNormalization.js";
 import { getTransformersJsEnv } from "../env.js";
 
 type TransformersJsConfig = NonNullable<
@@ -91,7 +92,7 @@ export function createTransformersJsClient(
         total_tokens: promptTokens + completionTokens,
       });
 
-      return { text, usage, raw: out };
+      return applyResponseFormatToAskResult(opts, { text, usage, raw: out });
     },
     async testConnection(): Promise<boolean> {
       try {

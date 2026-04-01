@@ -32,6 +32,23 @@ export type AttributionContext = {
   tags?: Record<string, string>;
 };
 
+export type ResponseFormat =
+  | { kind: "text" }
+  | { kind: "json_object" }
+  | {
+      kind: "json_schema";
+      schema: unknown;
+      name?: string;
+    };
+
+export type ResponseNormalization = {
+  stripReasoningBlocks?: boolean;
+  extractBalancedJsonObject?: boolean;
+  stripMarkdownFences?: boolean;
+  /** When `stripReasoningBlocks` is enabled, these replace the default vendor patterns. */
+  reasoningBlockPatterns?: RegExp[];
+};
+
 export type AskOptions = {
   maxTokens: number;
   temperature: number;
@@ -47,11 +64,17 @@ export type AskOptions = {
   timeoutMs?: number;
   /** Attribution metadata injected by the server layer. Skill functions do not set this directly. */
   attribution?: AttributionContext;
+  /** Declared response shape: maps to provider JSON APIs when supported; enables client-side normalization for JSON kinds. */
+  responseFormat?: ResponseFormat;
+  /** Override defaults for JSON normalization when `responseFormat` is `json_object` or `json_schema`. */
+  responseNormalization?: ResponseNormalization;
 };
 
 export type AskResult = {
   text: string;
   usage: Usage;
+  /** After normalization and parse, when `responseFormat` was `json_object` or `json_schema`. */
+  parsed?: unknown;
   /** Actual model used if known */
   model?: string;
   /** Full backend response (opt-in) */

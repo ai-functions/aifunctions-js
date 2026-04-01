@@ -30,6 +30,9 @@ export type { RankParams, RankResult, RankedItem } from "./list-operations/rank.
 export { cluster } from "./list-operations/cluster.js";
 export type { ClusterParams, ClusterResult, Cluster } from "./list-operations/cluster.js";
 
+export { match } from "./match/match.js";
+export type { MatchInput, MatchOutput } from "./match/match.js";
+
 export { callAI, callAIStream, formatRulesForInstruction } from "./callAI.js";
 export type { CallAIParams, CallAIResult, CallAIRule, SkillRunOptions, LlmMode } from "./callAI.js";
 

@@ -126,6 +126,68 @@ describe("OpenRouter request body mapping", () => {
     });
     assert.strictEqual(lastBody.user, "optimize.judge");
   });
+
+  it("sends response_format json_object when responseFormat is set", async () => {
+    const ai = createClient({
+      backend: "openrouter",
+      openrouter: { apiKey: "test-key" },
+    });
+    globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.body) {
+        lastBody = JSON.parse(init.body as string) as Record<string, unknown>;
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"a":1}' } }],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    };
+    const result = await ai.ask("Return JSON", {
+      model: "openai/gpt-4o",
+      maxTokens: 100,
+      temperature: 0.7,
+      responseFormat: { kind: "json_object" },
+    });
+    assert.deepStrictEqual(lastBody.response_format, { type: "json_object" });
+    assert.deepStrictEqual(result.parsed, { a: 1 });
+    assert.strictEqual(result.text, '{"a":1}');
+  });
+
+  it("sends response_format json_schema when responseFormat is json_schema", async () => {
+    const ai = createClient({
+      backend: "openrouter",
+      openrouter: { apiKey: "test-key" },
+    });
+    globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.body) {
+        lastBody = JSON.parse(init.body as string) as Record<string, unknown>;
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"b":2}' } }],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    };
+    const schema = { type: "object", additionalProperties: true };
+    await ai.ask("Schema", {
+      model: "openai/gpt-4o",
+      maxTokens: 100,
+      temperature: 0.7,
+      responseFormat: { kind: "json_schema", schema, name: "out" },
+    });
+    const rf = lastBody.response_format as {
+      type: string;
+      json_schema: { name: string; strict: boolean; schema: unknown };
+    };
+    assert.strictEqual(rf.type, "json_schema");
+    assert.strictEqual(rf.json_schema.name, "out");
+    assert.strictEqual(rf.json_schema.strict, true);
+    assert.deepStrictEqual(rf.json_schema.schema, schema);
+  });
 });
 
 describe("OpenRouter error mapping", () => {

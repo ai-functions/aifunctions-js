@@ -7,6 +7,7 @@ import type {
 import { NxAiApiError } from "../core/errors.js";
 import { resolveOptionsFromMode } from "../core/modePreset.js";
 import { normalizeUsage } from "../core/usage.js";
+import { applyResponseFormatToAskResult } from "../core/responseNormalization.js";
 import { getLlamaCppEnv } from "../env.js";
 
 type LlamaCppConfig = NonNullable<
@@ -102,7 +103,7 @@ export function createLlamaCppClient(
         total_tokens: promptTokenCount + completionTokenCount,
       });
 
-      return { text, usage, raw: undefined };
+      return applyResponseFormatToAskResult(opts, { text, usage, raw: undefined });
     },
     async *askStream(instruction: string, opts: AskOptions): AsyncIterable<StreamChunk> {
       const { model: m } = await ensureLoaded();

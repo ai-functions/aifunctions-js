@@ -13,7 +13,18 @@ export type {
   CreateClientOptions,
   LlmMode,
   AttributionContext,
+  ResponseFormat,
+  ResponseNormalization,
 } from "./core/types.js";
+export {
+  DEFAULT_REASONING_BLOCK_PATTERNS,
+  stripMarkdownFences,
+  stripReasoningBlocksFromText,
+  extractBalancedJsonObject,
+  normalizeAndParseJsonObjectResponse,
+  applyResponseFormatToAskResult,
+  openRouterResponseFormatBody,
+} from "./core/responseNormalization.js";
 export { extractAttribution } from "./serve/attribution.js";
 export {
   wrapWithUsageTracking,

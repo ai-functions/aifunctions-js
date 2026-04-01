@@ -17,6 +17,10 @@ export interface AskJsonParams<T = unknown> {
   client?: Client;
   mode?: LlmMode;
   model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+  vendor?: string | string[];
   schema?: object;
   schemaKey?: string;
   resolver?: ContentResolver;
@@ -42,6 +46,10 @@ export async function askJson<T = unknown>(params: AskJsonParams<T>): Promise<Ai
     client: providedClient,
     mode = "normal",
     model,
+    temperature,
+    maxTokens,
+    timeoutMs,
+    vendor,
     schema,
     schemaKey,
     resolver,
@@ -72,8 +80,10 @@ export async function askJson<T = unknown>(params: AskJsonParams<T>): Promise<Ai
   const opts = {
     system: chosenInstruction,
     model: model ?? (preset.backend === "openrouter" ? preset.model : undefined),
-    maxTokens: preset.maxTokens,
-    temperature: preset.temperature,
+    maxTokens: maxTokens ?? preset.maxTokens,
+    temperature: temperature ?? preset.temperature,
+    timeoutMs,
+    vendor,
   };
 
   const runCompletion = async (attemptOpts: { systemSuffix?: string; promptSuffix?: string }) => {

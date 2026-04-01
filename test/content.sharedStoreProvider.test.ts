@@ -42,16 +42,17 @@ describe("SharedStoreContentProvider via createFunctionContentProvider", () => {
     (globalThis as { fetch: typeof fetch }).fetch = async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
       fetchCalls.push(url);
-      if (url.includes("/strong") || url.includes("/weak")) {
+      // Keys are requested as encodeURIComponent("functions/test/strong") → ...%2Fstrong (no "/strong" substring)
+      if (url.includes("%2Fstrong") || url.includes("%2Fweak")) {
         return new Response("You are helpful.", { status: 200 });
       }
-      if (url.includes("/rules")) {
+      if (url.includes("%2Frules")) {
         return new Response(JSON.stringify([{ rule: "JSON only.", weight: 1 }]), { status: 200 });
       }
-      if (url.includes("/meta.json")) {
+      if (url.includes("meta.json")) {
         return new Response(JSON.stringify({ status: "draft" }), { status: 200 });
       }
-      if (url.includes("/test-cases.json")) {
+      if (url.includes("test-cases.json")) {
         return new Response("[]", { status: 200 });
       }
       return new Response("", { status: 404 });
@@ -66,7 +67,7 @@ describe("SharedStoreContentProvider via createFunctionContentProvider", () => {
       assert.ok(content.instructions?.strong || content.instructions?.weak);
       assert.strictEqual(content.source.mode, "shared-store");
       assert.strictEqual(content.source.baseUrl, baseUrl);
-      assert.ok(fetchCalls.some((u) => u.includes("strong") || u.includes("weak")));
+      assert.ok(fetchCalls.some((u) => u.includes("%2Fstrong") || u.includes("%2Fweak")));
     } finally {
       (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
     }

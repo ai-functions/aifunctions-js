@@ -7,6 +7,10 @@ import type {
 import { NxAiApiError } from "../core/errors.js";
 import { resolveOptionsFromMode } from "../core/modePreset.js";
 import { normalizeUsage } from "../core/usage.js";
+import {
+  applyResponseFormatToAskResult,
+  openRouterResponseFormatBody,
+} from "../core/responseNormalization.js";
 import { getModelOverrides, getOpenRouterEnv } from "../env.js";
 
 type OpenRouterConfig = NonNullable<
@@ -22,6 +26,8 @@ type OpenRouterRequestBody = {
   max_completion_tokens: number;
   stream?: boolean;
   provider?: { order: string[]; allow_fallbacks: boolean };
+  /** OpenAI-compatible structured output hint when supported by the route. */
+  response_format?: Record<string, unknown>;
   /** Attribution tag: "<projectId>:<functionId>" or "<functionId>". Visible in OpenRouter analytics. */
   user?: string;
 };
@@ -152,6 +158,9 @@ export function createOpenRouterClient(
           : opts.attribution.functionId;
       }
 
+      const rf = openRouterResponseFormatBody(opts.responseFormat);
+      if (rf) body.response_format = rf;
+
       const url = `${baseUrl}/chat/completions`;
       const headersValue: Record<string, string> = {
         "Content-Type": "application/json",
@@ -208,12 +217,12 @@ export function createOpenRouterClient(
             ? String(parsed.choices[0].message.content)
             : "";
         const usage = normalizeUsage(parsed?.usage);
-        return {
+        return applyResponseFormatToAskResult(opts, {
           text: textOut,
           usage,
           model: parsed?.model,
           raw: parsed,
-        };
+        });
       };
 
       return doFetch();
@@ -241,6 +250,7 @@ export function createOpenRouterClient(
           ? `${opts.attribution.projectId}:${opts.attribution.functionId}`
           : opts.attribution.functionId;
       }
+
       const url = `${baseUrl}/chat/completions`;
       const headersValue: Record<string, string> = {
         "Content-Type": "application/json",

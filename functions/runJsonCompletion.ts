@@ -29,7 +29,7 @@ export type RunJsonCompletionOptions = {
 
 /**
  * Execute a completion and return structured result with parsed JSON (or error).
- * Uses extractFirstJsonObject (fenced blocks + extract-first-json) and safeJsonParse.
+ * Uses extractFirstJsonObject (fenced blocks + balanced JSON scan) and safeJsonParse.
  */
 export async function runJsonCompletion(params: {
   instruction: string;

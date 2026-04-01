@@ -2,7 +2,9 @@ export type NxAiApiErrorCode =
   | "MISSING_ENV"
   | "OPENROUTER_HTTP_ERROR"
   | "TIMEOUT"
-  | "MISSING_OPTIONAL_DEP";
+  | "MISSING_OPTIONAL_DEP"
+  | "RESPONSE_NORMALIZATION_FAILED"
+  | "RESPONSE_SCHEMA_VALIDATION_FAILED";
 
 export class NxAiApiError extends Error {
   readonly name = "NxAiApiError";
